@@ -37,6 +37,16 @@ function Shell({ children }) {
  * to the server in small parts. Every question has a countdown. Copying, pasting and right-click are blocked, and leaving the page
  * is logged and warned about; too many tab switches end the interview for a person to review.
  */
+/** True in the page's own full screen (the browser allowed it). */
+function isFullScreen() {
+  return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+}
+/** The window fills the whole display: the browser's own full screen (F11). Only used after the page's full-screen request was refused. */
+function windowFillsDisplay() {
+  const sc = window.screen;
+  return Boolean(sc && window.innerWidth >= sc.width - 1 && window.innerHeight >= sc.height - 1);
+}
+
 export default function AiInterviewPage() {
   const { token } = useParams();
   const [view, setView] = useState(null);
@@ -73,7 +83,9 @@ export default function AiInterviewPage() {
   const screenRef = useRef(null); // the screen-share stream
   const compositeRef = useRef(null); // screen + face, what the recording is made from while sharing
   // Full screen and one display: with the interview in full screen no other window can sit next to it, so the rule is enforced on the page.
-  const [fsOk, setFsOk] = useState(() => Boolean(document.fullscreenElement));
+  const [fsOk, setFsOk] = useState(() => isFullScreen());
+  const [fsError, setFsError] = useState('');
+  const f11Ref = useRef(false); // the browser refused the page's full-screen request but the candidate made the window full screen (F11)
   const [multiDisplay, setMultiDisplay] = useState(false);
   const fsAwayRef = useRef(null); // since when the candidate has been out of full screen
   const hadFsRef = useRef(false);
@@ -331,12 +343,28 @@ export default function AiInterviewPage() {
   const needFullscreen = Boolean(view?.require_fullscreen);
   async function enterFullscreen() {
     graceUntilRef.current = Date.now() + GRACE_MS;
-    try { await document.documentElement.requestFullscreen(); return true; } catch { return false; }
+    setFsError('');
+    if (isFullScreen()) { setFsOk(true); return true; }
+    if (f11Ref.current && windowFillsDisplay()) { setFsOk(true); return true; }
+    const el = document.documentElement;
+    const attempts = [
+      () => el.requestFullscreen({ navigationUI: 'hide' }),
+      () => el.requestFullscreen(),
+      () => (el.webkitRequestFullscreen ? el.webkitRequestFullscreen() : Promise.reject(new Error('unsupported'))),
+    ];
+    for (const run of attempts) {
+      try { await run(); await new Promise((res) => setTimeout(res, 150)); if (isFullScreen()) { setFsOk(true); return true; } } catch { /* try the next way */ }
+    }
+    if (windowFillsDisplay()) { f11Ref.current = true; setFsOk(true); return true; }
+    setFsError('Your browser did not switch to full screen. Press F11 (Windows) or Ctrl+Cmd+F (Mac) to go full screen yourself, click anywhere on this page, then press the button again.');
+    return false;
   }
   useEffect(() => {
-    const sync = () => setFsOk(Boolean(document.fullscreenElement));
+    const sync = () => setFsOk(isFullScreen() || (f11Ref.current && windowFillsDisplay()));
     document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    window.addEventListener('resize', sync); // a browser full screen (F11) is seen by the window filling the display
+    return () => { document.removeEventListener('fullscreenchange', sync); document.removeEventListener('webkitfullscreenchange', sync); window.removeEventListener('resize', sync); };
   }, []);
   // Chrome and Edge say when a second display is connected
   useEffect(() => {
@@ -713,6 +741,7 @@ export default function AiInterviewPage() {
                 : 'This interview runs in full screen so that nothing else is open next to it. Leaving full screen is recorded as a warning. The interview stays covered until you return, and the question timer keeps running.'}
             </p>
             {!multiDisplay && <button type="button" className="btn-primary mt-4" onClick={enterFullscreen}>Return to full screen</button>}
+            {!multiDisplay && fsError && <p className="mt-3 text-xs text-warning-700" data-testid="fullscreen-help">{fsError}</p>}
           </div>
         </div>
       )}
