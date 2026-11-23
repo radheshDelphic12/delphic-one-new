@@ -1,5 +1,6 @@
 import { inr, inrShort } from '../../lib/gulati/meta.js';
 import { gulatiError } from '../../lib/gulati/api.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 export const inputCls = 'mt-1 w-full rounded-xl border px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100';
 export const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -100,7 +101,7 @@ export async function withReason(run) {
   } catch (e) {
     const msg = gulatiError(e, '');
     if (/reason/i.test(msg)) {
-      const reason = window.prompt(`${msg}\n\nReason for this change:`);
+      const reason = await promptAction(`${msg}\n\nReason for this change:`);
       if (reason && reason.trim()) return run(reason.trim());
     }
     throw e;

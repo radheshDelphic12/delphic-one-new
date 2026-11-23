@@ -7,7 +7,7 @@ import { nxApi, novarexError } from '../../lib/novarex/api.js';
 import { nxCan } from '../../lib/novarex/useNovarex.js';
 import { INVESTMENT_STATUS_META, PAYMENT_METHODS, STORED_STATUSES, inr } from '../../lib/novarex/meta.js';
 import { Area, DateInput, Money, Num, Select, Text, dayOf, toBody, today, withReason } from './ui.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 function InvestmentForm({ initial, categories, outlets = [], onSaved, onCancel, me }) {
   const editing = Boolean(initial);
@@ -80,7 +80,7 @@ function ReturnsPanel({ investment, onChanged, canEdit }) {
     } catch (err) { setError(novarexError(err, 'Could not record the return')); } finally { setSaving(false); }
   }
   async function reverse(r) {
-    const reason = window.prompt('Reason to reverse this return (it will stop counting):');
+    const reason = await promptAction('Reason to reverse this return (it will stop counting):');
     if (!reason || !reason.trim()) return;
     try { onChanged(await withReason((x) => nxApi.updateReturn(r.id, { status: 'reversed', reason: x || reason.trim() }))); pushSuccess('Return reversed'); } catch (err) { pushError(novarexError(err, 'Could not reverse'), 'Not changed'); }
   }

@@ -6,6 +6,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const KINDS = [['attendance', 'Attendance'], ['timesheets', 'Project timesheets']];
 const STATUS_FILTERS = [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['', 'All']];
@@ -59,7 +60,7 @@ export default function RegularizationAdminTab({ onPendingChange }) {
   async function decide(row, decision) {
     let reason;
     if (decision === 'rejected') {
-      reason = window.prompt('Reason for rejecting (optional):');
+      reason = await promptAction('Reason for rejecting (optional):');
       if (reason === null) return;
     }
     try {

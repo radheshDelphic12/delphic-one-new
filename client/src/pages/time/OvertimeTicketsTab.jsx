@@ -8,7 +8,7 @@ import Modal from '../../components/ui/Modal.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import { useAuth } from '../../lib/authContext.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const STATUS = { pending: 'Pending', manager_approved: 'Waiting for admin', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' };
@@ -191,8 +191,8 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     try { await fn(); pushSuccess(done); load(); } catch (err) { fail(err, 'That did not work'); }
   }
   const approve = (t) => call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status: 'approved' }), isAdmin ? 'Ticket approved' : 'Approved - it now waits for the admin');
-  const reject = (t) => {
-    const reason = window.prompt(`Reject ${t.employee}'s ${t.hours}h on ${t.date}? Give the reason (required):`);
+  const reject = async (t) => {
+    const reason = await promptAction(`Reject ${t.employee}'s ${t.hours}h on ${t.date}? Give the reason (required):`);
     if (reason === null) return undefined;
     if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return undefined; }
     return call(() => apiClient.post(`/timesheets/overtime-tickets/${t.id}/decision`, { status: 'rejected', reason: reason.trim() }), 'Ticket rejected');
@@ -211,7 +211,7 @@ export default function OvertimeTicketsTab({ isAdmin }) {
     if (!pickedTickets.length) return;
     let reason;
     if (status === 'rejected') {
-      reason = window.prompt(`Reject ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}? Give the reason (required, kept on each ticket):`);
+      reason = await promptAction(`Reject ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}? Give the reason (required, kept on each ticket):`);
       if (reason === null) return;
       if (reason.trim().length < 3) { pushError('A reason is required', 'Not rejected'); return; }
     } else if (!await confirmAction(`Approve ${pickedTickets.length} ticket${pickedTickets.length === 1 ? '' : 's'}?`)) return;
@@ -238,8 +238,8 @@ export default function OvertimeTicketsTab({ isAdmin }) {
   const allFiltered = Boolean(allFilter.status || allFilter.from || allFilter.to || allFilter.name.trim());
   const setAllF = (key) => (e) => setAllFilter((f) => ({ ...f, [key]: e.target.value }));
   const adminEdit = (t) => setAdminModal({ mode: 'edit', ticket: t });
-  const adminDelete = (t) => {
-    const reason = window.prompt(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
+  const adminDelete = async (t) => {
+    const reason = await promptAction(`Delete ${t.employee}'s ${t.hours}h ticket on ${t.date}? Give a reason (required):`);
     if (reason === null) return undefined;
     if (reason.trim().length < 3) { pushError('A reason is required', 'Not deleted'); return undefined; }
     return call(() => apiClient.delete(`/timesheets/overtime-tickets/${t.id}`, { data: { reason: reason.trim() } }), 'Ticket deleted');

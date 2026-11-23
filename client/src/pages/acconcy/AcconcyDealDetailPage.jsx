@@ -16,7 +16,7 @@ import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import TrackedPaymentsPanel from '../../components/payments/TrackedPaymentsPanel.jsx';
 import { DateInput, Detail, Empty, Kpi, Money, Select, Text, card, today, withReason } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -119,9 +119,9 @@ export default function AcconcyDealDetailPage() {
   async function setStatus(status) {
     let reason;
     let actual_end;
-    if (status === 'cancelled') { reason = window.prompt('Why is this deal cancelled?'); if (!reason?.trim()) return; }
-    else if (['completed', 'cancelled'].includes(deal.status)) { reason = window.prompt('Reason for reopening this deal:'); if (!reason?.trim()) return; }
-    if (status === 'completed') { actual_end = window.prompt('Actual completion date (YYYY-MM-DD)', today()); if (!actual_end) return; }
+    if (status === 'cancelled') { reason = await promptAction('Why is this deal cancelled?'); if (!reason?.trim()) return; }
+    else if (['completed', 'cancelled'].includes(deal.status)) { reason = await promptAction('Reason for reopening this deal:'); if (!reason?.trim()) return; }
+    if (status === 'completed') { actual_end = await promptAction('Actual completion date (YYYY-MM-DD)', today()); if (!actual_end) return; }
     try {
       await acconcyApi.setDealStatus(deal.id, { status, ...(reason ? { reason: reason.trim() } : {}), ...(actual_end ? { actual_end } : {}) });
       load();

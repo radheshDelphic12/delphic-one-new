@@ -12,6 +12,7 @@ import AcconcyFinancialTrends from '../../components/acconcy/AcconcyFinancialTre
 import FinanceFilters, { BLANK_FILTERS, financeQuery } from '../../components/acconcy/FinanceFilters.jsx';
 import { Empty, Kpi, Money, Num, Text, card, inputCls, labelCls } from '../../components/acconcy/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 function Th({ children, right }) {
@@ -179,12 +180,12 @@ function PeriodsTab() {
   const load = useCallback(() => acconcyApi.periods().then(setRows, (e) => pushError(acconcyError(e, 'Could not load months'), 'Load failed')), [pushError]);
   useEffect(() => { load(); }, [load]);
   async function close(m) {
-    const note = window.prompt(`Close ${shortMonth(m)}? Revenue, expenses, salaries, investments and assets dated in it are locked. Optional note:`, '');
+    const note = await promptAction(`Close ${shortMonth(m)}? Revenue, expenses, salaries, investments and assets dated in it are locked. Optional note:`, '');
     if (note === null) return;
     try { await acconcyApi.closeMonth(m, note.trim() ? { note: note.trim() } : {}); pushSuccess(`${shortMonth(m)} closed`); load(); } catch (e) { pushError(acconcyError(e, 'Could not close'), 'Could not close'); }
   }
   async function reopen(m) {
-    const reason = window.prompt(`Reason for reopening ${shortMonth(m)}:`);
+    const reason = await promptAction(`Reason for reopening ${shortMonth(m)}:`);
     if (!reason?.trim()) return;
     try { await acconcyApi.reopenMonth(m, { reason: reason.trim() }); pushSuccess(`${shortMonth(m)} reopened`); load(); } catch (e) { pushError(acconcyError(e, 'Could not reopen'), 'Could not reopen'); }
   }

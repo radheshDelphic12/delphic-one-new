@@ -7,7 +7,7 @@ import { zkApi, zklyreraError } from '../../lib/zklyrera/api.js';
 import { zkCan } from '../../lib/zklyrera/useZklyrera.js';
 import { INVESTMENT_STATUS_META, PAYMENT_METHODS, STORED_STATUSES, inr } from '../../lib/zklyrera/meta.js';
 import { Area, DateInput, Money, Num, Select, Text, dayOf, toBody, today, withReason } from './ui.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 function InvestmentForm({ initial, categories, onSaved, onCancel, me }) {
   const editing = Boolean(initial);
@@ -79,7 +79,7 @@ function ReturnsPanel({ investment, onChanged, canEdit }) {
     } catch (err) { setError(zklyreraError(err, 'Could not record the return')); } finally { setSaving(false); }
   }
   async function reverse(r) {
-    const reason = window.prompt('Reason to reverse this return (it will stop counting):');
+    const reason = await promptAction('Reason to reverse this return (it will stop counting):');
     if (!reason || !reason.trim()) return;
     try { onChanged(await withReason((x) => zkApi.updateReturn(r.id, { status: 'reversed', reason: x || reason.trim() }))); pushSuccess('Return reversed'); } catch (err) { pushError(zklyreraError(err, 'Could not reverse'), 'Not changed'); }
   }

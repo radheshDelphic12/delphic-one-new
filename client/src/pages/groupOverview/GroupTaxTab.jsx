@@ -10,7 +10,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import { FIELD_INPUT } from '../../components/ui/formLayout.jsx';
 import { KpiTile, SectionHeading } from './groupUi.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 // Group Dashboard > GST & TDS (docs/features/GROUP-TAX-TRACKING.md): invoice-wise base / GST / TDS, TDS receivable, GST payable, vendor TDS.
 
@@ -396,7 +396,7 @@ function useChallanActions(reload) {
   const { pushError, pushSuccess } = useAlerts();
   return {
     async remove(c) {
-      const reason = window.prompt(`Remove the ${c.kind_label} challan ${c.challan_number || ''}? Give a reason (optional):`);
+      const reason = await promptAction(`Remove the ${c.kind_label} challan ${c.challan_number || ''}? Give a reason (optional):`);
       if (reason === null) return;
       try { await apiClient.delete(`/group-tax/challans/${c.id}`, { data: { reason: reason.trim() || undefined } }); pushSuccess('Challan removed.', 'Removed'); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Failed to remove'), 'Something went wrong'); }
     },

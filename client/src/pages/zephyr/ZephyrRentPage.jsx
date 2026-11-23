@@ -15,7 +15,7 @@ import StatCard from '../../components/ui/StatCard.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import { LeaseForm, PaymentForm, TenantForm } from '../../components/zephyr/ZephyrRentForms.jsx';
 import { Empty, card, useDebounced } from '../../components/zephyr/formKit.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'dues', label: 'Rent due', description: 'Rent that is due to be collected.' },
@@ -149,12 +149,12 @@ export default function ZephyrRentPage() {
   }
   async function waive(due, undo) {
     if (undo) return void (await run(() => zephyrApi.updateRentDue(due.id, { waived: false }), 'Waiver removed'));
-    const reason = window.prompt(`Why is ${monthLabel(due.period)} rent for ${due.tenant.name} being waived?`);
+    const reason = await promptAction(`Why is ${monthLabel(due.period)} rent for ${due.tenant.name} being waived?`);
     if (!reason?.trim()) return undefined;
     return run(() => zephyrApi.updateRentDue(due.id, { waived: true, waived_reason: reason.trim() }), 'Rent waived');
   }
   async function editAmount(due) {
-    const value = window.prompt(`Rent for ${monthLabel(due.period)} (${due.tenant.name}). Change the amount due:`, String(due.amount));
+    const value = await promptAction(`Rent for ${monthLabel(due.period)} (${due.tenant.name}). Change the amount due:`, String(due.amount));
     if (value === null) return;
     const amount = Number(value);
     if (!(amount > 0)) return pushError('Enter an amount above zero', 'Not saved');
@@ -168,7 +168,7 @@ export default function ZephyrRentPage() {
     if (await run(() => (edit ? zephyrApi.updateLease(edit.id, values) : zephyrApi.createLease(values)), edit ? 'Lease updated' : 'Lease created')) close();
   }
   async function endLease(l) {
-    const reason = window.prompt(`End the lease of ${l.tenant?.name} on ${l.unit?.name}? Optionally say why:`, '');
+    const reason = await promptAction(`End the lease of ${l.tenant?.name} on ${l.unit?.name}? Optionally say why:`, '');
     if (reason !== null) await run(() => zephyrApi.endLease(l.id, { reason: reason.trim() || null }), 'Lease ended');
   }
   async function saveTenant(values) {

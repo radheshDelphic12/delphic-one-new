@@ -13,7 +13,7 @@ import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import GulatiTrendChart from '../../components/gulati/GulatiTrendChart.jsx';
 import { Area, DateInput, Empty, Kpi, Money, Num, Select, Text, card, dayOf, inputCls, labelCls, today, toBody, withReason } from '../../components/gulati/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -148,7 +148,7 @@ function PeriodsTab({ canClose }) {
     try { await gulatiApi.closeMonth(p.month, {}); pushSuccess('Month closed'); load(); } catch (e) { pushError(gulatiError(e, 'Could not close'), 'Could not close'); }
   }
   async function reopen(p) {
-    const reason = window.prompt(`Reason for reopening ${shortMonth(p.month)}:`);
+    const reason = await promptAction(`Reason for reopening ${shortMonth(p.month)}:`);
     if (!reason?.trim()) return;
     try { await gulatiApi.reopenMonth(p.month, { reason: reason.trim() }); pushSuccess('Month reopened'); load(); } catch (e) { pushError(gulatiError(e, 'Could not reopen'), 'Could not reopen'); }
   }

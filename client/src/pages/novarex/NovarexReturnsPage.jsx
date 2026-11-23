@@ -12,6 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { Area, Num, Select, Text } from '../../components/novarex/ui.jsx';
 import { Btn, titleOf, useAction, useRows } from '../../components/novarex/ops/common.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const DISPOSITIONS = [['restock', 'Restock: fit to sell again (cost of sales reversed)'], ['damaged', 'Damaged stock'], ['destroy', 'Destroy / write off'], ['supplier_return', 'Send back to the supplier']];
 
@@ -61,7 +62,7 @@ function InspectDrawer({ ret, onClose, onDone }) {
     e.preventDefault(); setErr('');
     try { await nxApi.ops.resolveReturn(ret.id, { disposition: d, issue_credit: credit }); pushSuccess('Inspection recorded'); onDone(); onClose(); } catch (x) {
       const msg = novarexError(x, 'Could not record the inspection');
-      if (/reason/i.test(msg)) { const reason = window.prompt(`${msg}\n\nReason:`); if (reason) { try { await nxApi.ops.resolveReturn(ret.id, { disposition: d, issue_credit: credit, reason }); onDone(); onClose(); return; } catch (y) { setErr(novarexError(y, msg)); return; } } }
+      if (/reason/i.test(msg)) { const reason = await promptAction(`${msg}\n\nReason:`); if (reason) { try { await nxApi.ops.resolveReturn(ret.id, { disposition: d, issue_credit: credit, reason }); onDone(); onClose(); return; } catch (y) { setErr(novarexError(y, msg)); return; } } }
       setErr(msg);
     }
   }

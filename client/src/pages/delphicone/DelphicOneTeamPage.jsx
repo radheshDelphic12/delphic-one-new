@@ -7,6 +7,7 @@ import Skeleton from '../../components/ui/Skeleton.jsx';
 import PasswordResultDrawer from './PasswordResultDrawer.jsx';
 import { inputCls, labelCls, th, td, useLoad, useSave } from './ui.jsx';
 import EmailLink from '../../components/ui/EmailLink.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 // Delphic One > Team (admins only): the people of the Delphic One company itself. It uses the same user service as People > Users, so the same rules apply.
 const ROLE_LABEL = { admin: 'Admin', sales: 'Sales', bda: 'BDA' };
@@ -54,7 +55,7 @@ export default function DelphicOneTeamPage() {
   const [shown, setShown] = useState(null); // the new password, shown once
   if (!data) return <Skeleton className="h-40" />;
   const resetPassword = async (m) => {
-    const typed = window.prompt(`Reset the password of ${m.name}?\n\nLeave empty to generate a strong one, or type a new one (at least 8 characters). Their earlier sign-ins end at once.`, '');
+    const typed = await promptAction(`Reset the password of ${m.name}?\n\nLeave empty to generate a strong one, or type a new one (at least 8 characters). Their earlier sign-ins end at once.`, '');
     if (typed === null) return;
     const r = await save(() => doxApi.resetTeamPassword(m.id, typed.trim() ? { password: typed.trim() } : {}), null, 'Could not reset the password');
     if (r) setShown(r);

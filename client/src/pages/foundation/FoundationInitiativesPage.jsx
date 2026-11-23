@@ -9,6 +9,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { Area, Num, Text, card } from '../../components/foundation/ui.jsx';
+import { confirmAction } from '../../lib/confirmAction.js';
 
 const SCOPES = [
   { key: 'initiative', label: 'Initiatives', blurb: 'The kinds of work the foundation does. Every campaign belongs to one.', addLabel: 'Add initiative' },
@@ -64,7 +65,7 @@ export default function FoundationInitiativesPage() {
     } catch (e) { setError(foundationError(e, 'Could not save')); } finally { setSaving(false); }
   }
   async function remove(r) {
-    if (!window.confirm(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
+    if (!await confirmAction(`Remove "${r.name}"? Existing records keep it; it just disappears from new forms.`)) return;
     try { await fxApi.deleteCategory(r.id); load(); } catch (e) { pushError(foundationError(e, 'Could not remove'), 'Not removed'); }
   }
 

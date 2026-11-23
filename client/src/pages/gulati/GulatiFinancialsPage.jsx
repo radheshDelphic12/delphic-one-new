@@ -11,7 +11,7 @@ import { compact, shortMonth } from '../../lib/format.js';
 import ChartCard from '../../components/ui/ChartCard.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import { GX_CHART } from '../../components/gulati/GulatiTrendChart.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const rupee = (n) => `${Number(n) < 0 ? '-' : ''}₹${compact(Math.abs(Number(n || 0)))}`;
 const rupees = (n) => `${Number(n) < 0 ? '-' : ''}₹${Math.abs(Number(n || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -125,7 +125,7 @@ function FinancialTrends() {
   async function toggleLock(r) {
     let reason;
     if (r.closed) {
-      reason = window.prompt(`Reopen ${r.label}? Give a reason (required):`);
+      reason = await promptAction(`Reopen ${r.label}? Give a reason (required):`);
       if (reason === null) return;
       if (!reason.trim()) { pushError('A reason is required to reopen a month', 'Not reopened'); return; }
     } else if (!await confirmAction(`Lock ${r.label}? Its figures are frozen as they are now. An admin can reopen it later with a reason.`)) return;

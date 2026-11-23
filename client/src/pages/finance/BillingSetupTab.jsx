@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const STATUS_LABELS = {
   present: 'Present (also Present + OT)',
@@ -62,7 +63,7 @@ export default function BillingSetupTab() {
   }
 
   async function removeRate(row) {
-    const reason = window.prompt(`Remove ${row.resource}'s ${row.rate_type} rate? Give a reason (required):`);
+    const reason = await promptAction(`Remove ${row.resource}'s ${row.rate_type} rate? Give a reason (required):`);
     if (reason === null) return;
     if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not removed'); return; }
     try {
@@ -82,7 +83,7 @@ export default function BillingSetupTab() {
 
   async function saveRules(event) {
     event.preventDefault();
-    const reason = window.prompt('Reason for changing the client billing status rules:') || undefined;
+    const reason = await promptAction('Reason for changing the client billing status rules:') || undefined;
     try {
       const body = Object.fromEntries(Object.keys(STATUS_LABELS).map((k) => [k, Number(rules.rules[k])]));
       const { data } = await apiClient.put(`/billing/projects/${accountId}/billing-rules`, { rules: body, reason });

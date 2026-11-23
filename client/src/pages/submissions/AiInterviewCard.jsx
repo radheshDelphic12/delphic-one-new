@@ -5,7 +5,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import { isAdminUser } from '../../lib/access.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const STATUS_LABEL = { not_opened: 'Not opened', in_progress: 'In progress', scored: 'Scored', pending_review: 'Needs a person to review', expired: 'Expired', superseded: 'Replaced' };
 const STATUS_TONE = {
@@ -233,8 +233,8 @@ export default function AiInterviewCard({ submissionId, submission, user }) {
     await openReview(review);
   }, 'Could not save your decision');
 
-  const remove = (item) => {
-    const reason = window.prompt('Why delete this AI interview? (the candidate can then be sent a new one)');
+  const remove = async (item) => {
+    const reason = await promptAction('Why delete this AI interview? (the candidate can then be sent a new one)');
     if (reason === null) return;
     run(async () => { await apiClient.delete(`/ai-interviews/${item.id}`, { data: { reason: reason.trim() || undefined } }); await load(); }, 'Could not delete the AI interview');
   };

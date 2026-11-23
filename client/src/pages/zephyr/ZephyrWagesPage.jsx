@@ -13,7 +13,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { Detail, Section, dayOf, inputCls, labelCls, today } from '../../components/zephyr/formKit.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'attendance', label: 'Attendance', description: 'Daily attendance of site workers.' },
@@ -371,7 +371,7 @@ function PayoutsTab({ canPay, run, saving, onChanged, reloadKey }) {
     }
   }
   async function voidIt(p) {
-    const reason = window.prompt(`Void this payout of ${rupees(p.net)} to ${p.worker?.name}? Their days become unpaid again. Why?`);
+    const reason = await promptAction(`Void this payout of ${rupees(p.net)} to ${p.worker?.name}? Their days become unpaid again. Why?`);
     if (reason?.trim() && (await run(() => zephyrApi.voidWagePayout(p.id, reason.trim()), 'Payout voided'))) {
       setDrawer(null);
       await load();

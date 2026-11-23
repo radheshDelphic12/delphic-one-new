@@ -6,7 +6,7 @@ import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -162,7 +162,7 @@ function MonthCalendar({ year, month, member, onBack }) {
     if (!await confirmAction(`Delete ${ids.length} selected log${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
     let reason;
     if (user?.role === 'admin') {
-      reason = window.prompt('Reason for deleting (required):') || '';
+      reason = await promptAction('Reason for deleting (required):') || '';
       if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
     }
     setDeleting(true);

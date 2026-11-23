@@ -7,6 +7,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import ChangeDetail from '../../components/ChangeDetail.jsx';
 import { ACTION_LABEL, ACTION_TONE, entityLabel, whenLabel } from '../../components/changeLogUi.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const inputCls = 'mt-1 block w-full rounded-xl border border-tertiary-200 bg-white px-3 py-2 text-sm';
 const labelCls = 'block text-xs font-medium text-tertiary-600';
@@ -88,7 +89,7 @@ function Deleted() {
   useEffect(() => { load(); }, [load]);
 
   async function restore(row) {
-    const reason = window.prompt(`Restore ${entityLabel(row.entity_type)} "${row.name || row.entity_id}"? Give a reason:`, 'Deleted by mistake');
+    const reason = await promptAction(`Restore ${entityLabel(row.entity_type)} "${row.name || row.entity_id}"? Give a reason:`, 'Deleted by mistake');
     if (reason === null) return;
     try {
       await apiClient.post('/change-log/restore', { entity_type: row.entity_type, entity_id: row.entity_id, reason: reason.trim() || 'Restored' });

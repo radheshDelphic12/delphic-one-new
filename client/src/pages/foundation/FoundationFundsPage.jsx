@@ -12,7 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import EntryDrawer from '../../components/foundation/EntryDrawer.jsx';
 import { Kpi, Money } from '../../components/foundation/ui.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const BLANK = { q: '', campaign_id: '', kind: '', status: '', expense_class: '', category_id: '', from: '', to: '', amount_min: '', amount_max: '' };
 const ALL_STATUS = Object.values(ALL_ENTRY_STATUSES).filter((s, i, a) => a.findIndex((x) => x.value === s.value) === i).map((s) => ({ value: s.value, label: s.label }));
@@ -39,7 +39,7 @@ export default function FoundationFundsPage() {
 
   async function act(entry, to) {
     let reason;
-    if (NEEDS_REASON.includes(to)) { reason = window.prompt(`Reason to ${(ACTION_LABEL[to] || to).toLowerCase()}:`); if (!reason || !reason.trim()) return; }
+    if (NEEDS_REASON.includes(to)) { reason = await promptAction(`Reason to ${(ACTION_LABEL[to] || to).toLowerCase()}:`); if (!reason || !reason.trim()) return; }
     try {
       await fxApi.setEntryStatus(entry.id, { to, ...(reason ? { reason: reason.trim() } : {}) });
       pushSuccess(`${ACTION_LABEL[to] || to}: done`);
@@ -47,7 +47,7 @@ export default function FoundationFundsPage() {
     } catch (e) {
       const code = e?.response?.data?.code;
       if (code === 'over_budget' || code === 'override_reason_required') {
-        const why = window.prompt(`${foundationError(e, '')}\n\nReason for going over budget (admin only):`);
+        const why = await promptAction(`${foundationError(e, '')}\n\nReason for going over budget (admin only):`);
         if (why && why.trim()) { try { await fxApi.setEntryStatus(entry.id, { to, override_reason: why.trim() }); load(); return; } catch (e2) { pushError(foundationError(e2, 'Not changed'), 'Not changed'); return; } }
       }
       pushError(foundationError(e, 'Could not change the entry'), 'Not changed');

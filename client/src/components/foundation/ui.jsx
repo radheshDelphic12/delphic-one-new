@@ -1,4 +1,5 @@
 import { foundationError } from '../../lib/foundation/api.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 // Shared form / layout primitives are the same ones every vertical workspace uses; only the error helper is the Foundation's own.
 export * from '../acconcy/ui.jsx';
@@ -13,7 +14,7 @@ export async function withReason(run) {
   } catch (e) {
     const msg = foundationError(e, '');
     if (/reason/i.test(msg)) {
-      const reason = window.prompt(`${msg}\n\nReason for this change:`);
+      const reason = await promptAction(`${msg}\n\nReason for this change:`);
       if (reason && reason.trim()) return run(reason.trim());
     }
     throw e;

@@ -10,7 +10,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, DateInput, Detail, Section, Select, Text, dayOf, toBody } from '../../components/zklyrera/ui.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 import EmailLink from '../../components/ui/EmailLink.jsx';
 
 const KIND_OPTIONS = [{ value: 'employee', label: 'Employee' }, { value: 'contractor', label: 'Contractor' }];
@@ -147,7 +147,7 @@ export default function ZklyreraPeoplePage() {
   }
   async function toggleUser(u) {
     let reason;
-    if (u.active) { reason = window.prompt(`Reason for deactivating ${u.name} (optional):`) ?? undefined; if (reason === undefined) return; }
+    if (u.active) { reason = await promptAction(`Reason for deactivating ${u.name} (optional):`) ?? undefined; if (reason === undefined) return; }
     try { await zkApi.setUserActive(u.id, { active: !u.active, ...(reason ? { reason } : {}) }); loadUsers(); loadPeople(); } catch (e) { pushError(zklyreraError(e, 'Could not update'), 'Could not update'); }
   }
 

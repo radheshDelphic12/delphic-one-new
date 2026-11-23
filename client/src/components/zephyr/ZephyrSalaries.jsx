@@ -6,6 +6,7 @@ import { rupees } from '../../lib/zephyr/projectMeta.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const STATUS_TONE = { draft: 'gray', approved: 'amber', paid: 'green' };
 const thisMonth = () => new Date().toISOString().slice(0, 7);
@@ -114,7 +115,7 @@ export default function ZephyrSalaries({ projects }) {
                     {draft && <button type="button" className="rounded-lg p-1.5 text-tertiary-500 hover:bg-primary-50 hover:text-primary-700" title="Project split" aria-label="Edit project split" onClick={() => setSplitFor(r)}><Split className="h-4 w-4" /></button>}
                     {draft && <button type="button" className="rounded-lg p-1.5 text-tertiary-500 hover:bg-primary-50 hover:text-primary-700" title="Approve" aria-label="Approve" disabled={busy} onClick={() => run(() => zephyrApi.approveSalary(r.id), 'Approved')}><Check className="h-4 w-4" /></button>}
                     {r.status === 'approved' && <button type="button" className="rounded-lg p-1.5 text-tertiary-500 hover:bg-primary-50 hover:text-primary-700" title="Mark paid" aria-label="Mark paid" disabled={busy} onClick={() => run(() => zephyrApi.paySalary(r.id), 'Marked paid')}><CircleDollarSign className="h-4 w-4" /></button>}
-                    {r.status !== 'draft' && <button type="button" className="rounded-lg p-1.5 text-tertiary-500 hover:bg-amber-50 hover:text-amber-700" title="Reopen" aria-label="Reopen" disabled={busy} onClick={() => { const reason = window.prompt('Why is this slip being reopened?'); if (reason?.trim()) run(() => zephyrApi.unapproveSalary(r.id, reason.trim()), 'Reopened as draft'); }}><RotateCcw className="h-4 w-4" /></button>}
+                    {r.status !== 'draft' && <button type="button" className="rounded-lg p-1.5 text-tertiary-500 hover:bg-amber-50 hover:text-amber-700" title="Reopen" aria-label="Reopen" disabled={busy} onClick={async () => { const reason = await promptAction('Why is this slip being reopened?'); if (reason?.trim()) run(() => zephyrApi.unapproveSalary(r.id, reason.trim()), 'Reopened as draft'); }}><RotateCcw className="h-4 w-4" /></button>}
                     {draft && <button type="button" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" title="Delete" aria-label="Delete slip" disabled={busy} onClick={() => run(() => zephyrApi.deleteSalary(r.id), 'Deleted')}><Trash2 className="h-4 w-4" /></button>}
                   </td>
                 </tr>

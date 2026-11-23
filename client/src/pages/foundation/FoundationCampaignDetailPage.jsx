@@ -16,7 +16,7 @@ import EntryDrawer from '../../components/foundation/EntryDrawer.jsx';
 import { BudgetForm, PlanEditor } from '../../components/foundation/BudgetAndPlan.jsx';
 import { MonthlyChart } from '../../components/foundation/FxCharts.jsx';
 import { Detail, Empty, Kpi, Money, card } from '../../components/foundation/ui.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const STATUS_ACTION = { planned: 'Mark as planned', active: 'Start / resume', on_hold: 'Put on hold', completed: 'Mark completed', cancelled: 'Cancel campaign', draft: 'Back to draft' };
 const REASON_FOR = { cancelled: 'Why is the campaign being cancelled?' };
@@ -62,7 +62,7 @@ export default function FoundationCampaignDetailPage() {
   async function changeStatus(to) {
     let reason;
     if (to === 'cancelled' || ['completed', 'cancelled'].includes(c.status)) {
-      reason = window.prompt(REASON_FOR[to] || `Reason for moving this campaign to "${STATUS_META[to].label}":`);
+      reason = await promptAction(REASON_FOR[to] || `Reason for moving this campaign to "${STATUS_META[to].label}":`);
       if (!reason || !reason.trim()) return;
     }
     try { await fxApi.setCampaignStatus(id, { to, ...(reason ? { reason: reason.trim() } : {}) }); pushSuccess(`Campaign is now ${STATUS_META[to].label}`); load(); } catch (e) { pushError(foundationError(e, 'Could not change the status'), 'Not changed'); }
@@ -73,11 +73,11 @@ export default function FoundationCampaignDetailPage() {
   }
   async function entryAction(entry, to) {
     let reason;
-    if (['rejected', 'cancelled', 'reversed'].includes(to)) { reason = window.prompt(`Reason to ${to === 'reversed' ? 'reverse this payment' : to === 'rejected' ? 'reject this' : 'cancel this'}:`); if (!reason || !reason.trim()) return; }
+    if (['rejected', 'cancelled', 'reversed'].includes(to)) { reason = await promptAction(`Reason to ${to === 'reversed' ? 'reverse this payment' : to === 'rejected' ? 'reject this' : 'cancel this'}:`); if (!reason || !reason.trim()) return; }
     try { await fxApi.setEntryStatus(entry.id, { to, ...(reason ? { reason: reason.trim() } : {}) }); load(); } catch (e) {
       const data = e?.response?.data;
       if (data?.code === 'over_budget' || data?.code === 'override_reason_required') {
-        const why = window.prompt(`${foundationError(e, '')}\n\nReason for going over budget (admin only):`);
+        const why = await promptAction(`${foundationError(e, '')}\n\nReason for going over budget (admin only):`);
         if (why && why.trim()) { try { await fxApi.setEntryStatus(entry.id, { to, override_reason: why.trim() }); load(); return; } catch (e2) { pushError(foundationError(e2, 'Not changed'), 'Not changed'); return; } }
       }
       pushError(foundationError(e, 'Could not change the entry'), 'Not changed');

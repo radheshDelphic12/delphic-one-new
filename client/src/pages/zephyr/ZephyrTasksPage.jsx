@@ -12,7 +12,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { Detail, Section, dayOf, inputCls, labelCls, toBody, today, useDebounced } from '../../components/zephyr/formKit.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const VIEWS = [
   { key: 'open', label: 'Open' },
@@ -166,7 +166,7 @@ export default function ZephyrTasksPage() {
     if (await confirmAction('Cancel this task?')) keep(await run(() => zephyrApi.setTaskStatus(current.id, { status: 'cancelled' }), 'Task cancelled'));
   }
   async function reopen() {
-    const reason = window.prompt('Why is this task being reopened?');
+    const reason = await promptAction('Why is this task being reopened?');
     if (reason?.trim()) keep(await run(() => zephyrApi.reopenTask(current.id, reason.trim()), 'Task reopened'));
   }
   async function remove() {

@@ -11,7 +11,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import { Area, Empty, Kpi, Money, Num, withReason, labelCls, inputCls } from '../../components/acconcy/ui.jsx';
 import { dateLabel, shortMonth } from '../../lib/format.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -90,12 +90,12 @@ export default function AcconcySalariesPage() {
     }
   }
   async function pay(r) {
-    const paid_on = window.prompt('Paid on (YYYY-MM-DD)', new Date().toISOString().slice(0, 10));
+    const paid_on = await promptAction('Paid on (YYYY-MM-DD)', new Date().toISOString().slice(0, 10));
     if (!paid_on) return;
     act(() => acconcyApi.paySalary(r.id, { paid_on }), 'Marked paid');
   }
   async function unapprove(r) {
-    const reason = window.prompt('Reason for sending this salary back to draft:');
+    const reason = await promptAction('Reason for sending this salary back to draft:');
     if (!reason?.trim()) return;
     act(() => acconcyApi.unapproveSalary(r.id, { reason: reason.trim() }), 'Back to draft');
   }

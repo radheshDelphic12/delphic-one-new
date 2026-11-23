@@ -12,6 +12,7 @@ import VendorPayoutPanel from './VendorPayoutPanel.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import { PurchaseDrawer, PayPurchaseDrawer } from './VendorPurchaseDrawers.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -159,8 +160,8 @@ export default function VendorInvoicesTab() {
       pushError(apiErrorMessage(err, 'Failed to update the purchase'), 'Something went wrong');
     }
   }
-  function cancelPurchase(purchase) {
-    const reason = window.prompt(`Cancel purchase ${purchase.bill_number}? Its expense is removed. Reason (optional):`, '');
+  async function cancelPurchase(purchase) {
+    const reason = await promptAction(`Cancel purchase ${purchase.bill_number}? Its expense is removed. Reason (optional):`, '');
     if (reason === null) return;
     purchaseAction(purchase, { name: 'cancel', body: { reason: reason.trim() || undefined } }, 'Purchase cancelled');
   }
@@ -175,14 +176,14 @@ export default function VendorInvoicesTab() {
     }
   }
 
-  function editMoney(row) {
-    const gst = window.prompt('GST (amount added to the payable):', String(row.gst_amount ?? 0));
+  async function editMoney(row) {
+    const gst = await promptAction('GST (amount added to the payable):', String(row.gst_amount ?? 0));
     if (gst === null) return;
-    const tds = window.prompt('TDS withheld (amount):', String(row.tds_amount ?? 0));
+    const tds = await promptAction('TDS withheld (amount):', String(row.tds_amount ?? 0));
     if (tds === null) return;
-    const adjustment = window.prompt('Financial adjustment (negative reduces the payable):', String(row.adjustment_amount ?? 0));
+    const adjustment = await promptAction('Financial adjustment (negative reduces the payable):', String(row.adjustment_amount ?? 0));
     if (adjustment === null) return;
-    const note = window.prompt('Note for the adjustment (optional):', row.adjustment_note || '') ?? '';
+    const note = await promptAction('Note for the adjustment (optional):', row.adjustment_note || '') ?? '';
     track(row, { gst_amount: Number(gst) || 0, tds_amount: Number(tds) || 0, adjustment_amount: Number(adjustment) || 0, adjustment_note: note.trim() || undefined }, 'GST / TDS / adjustment saved');
   }
 

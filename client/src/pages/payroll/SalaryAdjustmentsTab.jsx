@@ -7,6 +7,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const KINDS = [
@@ -59,7 +60,7 @@ export default function SalaryAdjustmentsTab() {
   }
 
   async function remove(row) {
-    const reason = window.prompt(`Remove ${row.label} of ${money(row.amount)} for ${row.employee}? Give a reason (required):`);
+    const reason = await promptAction(`Remove ${row.label} of ${money(row.amount)} for ${row.employee}? Give a reason (required):`);
     if (reason === null) return;
     if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not removed'); return; }
     try {

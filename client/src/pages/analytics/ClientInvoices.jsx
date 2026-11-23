@@ -15,6 +15,7 @@ import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import PeriodPicker, { periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import { amountText, billingCalculationLines, dateText } from '../../components/finance/financePrint.js';
 import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const CURRENCIES = ['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP'];
@@ -308,7 +309,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
   // Admin delete, any status. A sent / paid invoice needs a reason (audited).
   async function remove(row) {
     const needsReason = row.status !== 'draft';
-    const reason = window.prompt(needsReason
+    const reason = await promptAction(needsReason
       ? `Invoice ${row.invoice_number || ''} is already ${row.status}. Give a reason to delete it (required):`
       : `Delete draft invoice ${row.invoice_number || ''}? Reason (optional):`);
     if (reason === null) return;

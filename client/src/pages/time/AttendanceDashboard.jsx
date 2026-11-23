@@ -6,6 +6,7 @@ import { adminFor, allowed } from '../../lib/access.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import AttendanceRegister from './AttendanceRegister.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -233,7 +234,7 @@ function WorkingAway({ member, canEdit, onSaved }) {
     } catch (err) { pushError(apiErrorMessage(err, 'Could not save the work location'), 'Not saved'); }
   };
   const cancel = async (row) => {
-    const reason = window.prompt('Why is this work location being cancelled?');
+    const reason = await promptAction('Why is this work location being cancelled?');
     if (!reason || reason.trim().length < 3) return;
     try {
       await apiClient.post(`/attendance-dashboard/work-locations/${row.id}/cancel`, { reason: reason.trim() });

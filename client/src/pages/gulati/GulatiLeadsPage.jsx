@@ -13,7 +13,7 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import GulatiDocuments from '../../components/gulati/GulatiDocuments.jsx';
 import { Area, DateInput, Detail, Money, Num, Section, Select, Text, card, dayOf, today, toBody } from '../../components/gulati/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const KINDS = [{ value: 'call', label: 'Call' }, { value: 'visit', label: 'Visit' }, { value: 'meeting', label: 'Meeting' }, { value: 'note', label: 'Note' }];
 const NUMS = ['quantity', 'expected_purchase_amount', 'expected_sale_amount', 'expected_margin'];
@@ -199,7 +199,7 @@ export default function GulatiLeadsPage() {
         pushSuccess(`${created.code} created`);
         setDrawer({ mode: 'view', lead: created });
       } else {
-        const reason = isAdmin && DONE_STAGES.includes(drawer.lead.stage) ? window.prompt('This lead is closed. Reason for the admin edit:') : undefined;
+        const reason = isAdmin && DONE_STAGES.includes(drawer.lead.stage) ? await promptAction('This lead is closed. Reason for the admin edit:') : undefined;
         if (isAdmin && DONE_STAGES.includes(drawer.lead.stage) && !reason) { setSaving(false); return; }
         const updated = await gulatiApi.updateLead(drawer.lead.id, { ...body, ...(reason ? { reason } : {}) });
         pushSuccess('Saved');
@@ -215,7 +215,7 @@ export default function GulatiLeadsPage() {
   async function move(stage) {
     let lost_reason;
     if (stage === 'dropped') {
-      lost_reason = window.prompt('Why was this lead dropped?');
+      lost_reason = await promptAction('Why was this lead dropped?');
       if (!lost_reason?.trim()) return;
     }
     try {
@@ -226,7 +226,7 @@ export default function GulatiLeadsPage() {
     }
   }
   async function reopen() {
-    const reason = window.prompt('Reason for reopening this lead:');
+    const reason = await promptAction('Reason for reopening this lead:');
     if (!reason?.trim()) return;
     try {
       await gulatiApi.reopenLead(lead.id, { stage: 'negotiation', reason: reason.trim() });

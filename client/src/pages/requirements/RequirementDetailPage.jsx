@@ -31,6 +31,7 @@ import {
 } from '../../lib/requirementStages.js';
 import RequirementStatusOverrideDrawer from './RequirementStatusOverrideDrawer.jsx';
 import WebsitePublishPanel from '../website/WebsitePublishPanel.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -361,7 +362,7 @@ export default function RequirementDetailPage() {
               type="button"
               className="btn-secondary text-danger-600"
               onClick={async () => {
-                const reason = window.prompt('Why is this requirement being deleted? (kept in the activity log)');
+                const reason = await promptAction('Why is this requirement being deleted? (kept in the activity log)');
                 if (!reason || reason.trim().length < 3) return;
                 try {
                   await apiClient.delete(`/requirements/${requirement.id}`, { data: { reason: reason.trim() } });

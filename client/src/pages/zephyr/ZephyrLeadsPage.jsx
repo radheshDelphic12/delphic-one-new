@@ -12,7 +12,7 @@ import Pill from '../../components/ui/Pill.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const KINDS = [
   { value: 'call', label: 'Call' },
@@ -396,7 +396,7 @@ export default function ZephyrLeadsPage() {
   }
 
   async function reopen() {
-    const reason = window.prompt('Why is this lead being reopened?');
+    const reason = await promptAction('Why is this lead being reopened?');
     if (!reason?.trim()) return;
     const saved = await run(() => zephyrApi.reopenLead(lead.id, { stage: 'negotiation', reason: reason.trim() }), 'Lead reopened', 'Could not reopen');
     if (saved) setDrawer({ mode: 'view', lead: saved });

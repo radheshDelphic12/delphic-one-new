@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Bold, Heading2, Heading3, Italic, Link2, List, ListOrdered, Minus, Quote, Redo2, Underline, Undo2 } from 'lucide-react';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const TOOLS = [
   { cmd: 'bold', Icon: Bold, label: 'Bold' },
@@ -35,8 +36,8 @@ export default function RichTextEditor({ value, onChange, resetKey, placeholder 
     onChange(ref.current.innerHTML);
   }
 
-  function addLink() {
-    const url = window.prompt('Link address (https://…)');
+  async function addLink() {
+    const url = await promptAction('Link address (https://…)');
     if (!url) return;
     if (!/^(https?:\/\/|mailto:)/i.test(url.trim())) {
       window.alert('Only http(s) and mailto links are allowed.');

@@ -9,6 +9,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
 import CompanyStructure from '../../components/structure/CompanyStructure.jsx';
 import EmailLink from '../../components/ui/EmailLink.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const TABS = [
   { key: 'company', label: 'Company', icon: Building2 },
@@ -296,7 +297,7 @@ function UsersTab() {
     const active = !user.active;
     let reason;
     if (!active) {
-      reason = window.prompt(`Deactivate ${user.name}? They will no longer be able to sign in to this company.
+      reason = await promptAction(`Deactivate ${user.name}? They will no longer be able to sign in to this company.
 Reason (optional):`);
       if (reason === null) return;
     }

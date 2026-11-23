@@ -15,6 +15,7 @@ import { useOrgMembershipOptions } from '../../lib/lookups.js';
 import { BackfillMonthDrawer, BulkAttendanceDrawer, ManualAttendanceDrawer } from './AttendanceBackfill.jsx';
 import { AttendanceDays, AttendanceHeader } from './AttendanceModern.jsx';
 import AttendanceRegularizationRequests from './AttendanceRegularizationRequests.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const STATUS_OPTIONS = ['', 'present', 'absent', 'half_day', 'leave', 'holiday', 'wfh'];
 
@@ -143,7 +144,7 @@ export default function AttendancePage() {
   // Admin: remove a wrong record at any stage (a finalized month is flagged
   // for recalculation rather than rewritten).
   async function removeRecord(row) {
-    const reason = window.prompt(`Delete ${row.org_membership?.person?.name || 'this'} attendance for ${String(row.date).slice(0, 10)}? Give a reason (required):`);
+    const reason = await promptAction(`Delete ${row.org_membership?.person?.name || 'this'} attendance for ${String(row.date).slice(0, 10)}? Give a reason (required):`);
     if (reason === null) return;
     if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
     try {

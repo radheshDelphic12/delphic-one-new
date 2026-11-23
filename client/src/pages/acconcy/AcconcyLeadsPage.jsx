@@ -13,7 +13,7 @@ import FilterBar from '../../components/zephyr/FilterBar.jsx';
 import AcconcyDocuments from '../../components/acconcy/AcconcyDocuments.jsx';
 import { Area, DateInput, Detail, Money, Num, Section, Select, Text, card, dayOf, today, toBody } from '../../components/acconcy/ui.jsx';
 import { dateLabel } from '../../lib/format.js';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const KINDS = [{ value: 'call', label: 'Call' }, { value: 'meeting', label: 'Meeting' }, { value: 'visit', label: 'Visit' }, { value: 'note', label: 'Note' }];
 const NUMS = ['expected_amount', 'expected_revenue', 'expected_profit'];
@@ -197,7 +197,7 @@ export default function AcconcyLeadsPage() {
         pushSuccess(`${created.code} created`);
         setDrawer({ mode: 'view', lead: created });
       } else {
-        const reason = isAdmin && DONE_STAGES.includes(drawer.lead.stage) ? window.prompt('This lead is closed. Reason for the admin edit:') : undefined;
+        const reason = isAdmin && DONE_STAGES.includes(drawer.lead.stage) ? await promptAction('This lead is closed. Reason for the admin edit:') : undefined;
         if (isAdmin && DONE_STAGES.includes(drawer.lead.stage) && !reason) { setSaving(false); return; }
         const updated = await acconcyApi.updateLead(drawer.lead.id, { ...body, ...(reason ? { reason } : {}) });
         pushSuccess('Saved');
@@ -213,7 +213,7 @@ export default function AcconcyLeadsPage() {
   async function move(stage) {
     let lost_reason;
     if (stage === 'dropped') {
-      lost_reason = window.prompt('Why was this lead dropped?');
+      lost_reason = await promptAction('Why was this lead dropped?');
       if (!lost_reason?.trim()) return;
     }
     try {
@@ -224,7 +224,7 @@ export default function AcconcyLeadsPage() {
     }
   }
   async function reopen() {
-    const reason = window.prompt('Reason for reopening this lead:');
+    const reason = await promptAction('Reason for reopening this lead:');
     if (!reason?.trim()) return;
     try {
       await acconcyApi.reopenLead(lead.id, { stage: 'negotiation', reason: reason.trim() });

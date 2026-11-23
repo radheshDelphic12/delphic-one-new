@@ -13,6 +13,7 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import { DateInput, Detail, Num, Text, today } from '../../components/novarex/ui.jsx';
 import { Btn, Kpi, Money, inputCls, num, titleOf, useAction, useRows } from '../../components/novarex/ops/common.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const TYPES = [['sales', 'Sales invoice'], ['franchise', 'Franchise fee / royalty'], ['purchase', 'Purchase invoice'], ['credit_note', 'Credit note'], ['debit_note', 'Debit note']];
 const STATUS_TONE = { paid: 'green', partially_paid: 'amber', issued: 'blue', credited: 'green', cancelled: 'red' };
@@ -36,7 +37,7 @@ function InvoiceDetail({ id, onClose, onChanged, canEdit }) {
       pushSuccess(refund ? 'Refund recorded' : 'Payment recorded'); setPay(null); refresh();
     } catch (x) {
       const msg = novarexError(x, 'Could not record the payment');
-      if (/reason/i.test(msg)) { const reason = window.prompt(`${msg}\n\nReason:`); if (reason) { try { await nxApi.ops.pay(id, { amount: num(pay.amount), pay_date: pay.pay_date || undefined, method: pay.method || null, reference: pay.reference || null, reason }); setPay(null); refresh(); return; } catch (y) { setErr(novarexError(y, msg)); return; } } }
+      if (/reason/i.test(msg)) { const reason = await promptAction(`${msg}\n\nReason:`); if (reason) { try { await nxApi.ops.pay(id, { amount: num(pay.amount), pay_date: pay.pay_date || undefined, method: pay.method || null, reference: pay.reference || null, reason }); setPay(null); refresh(); return; } catch (y) { setErr(novarexError(y, msg)); return; } } }
       setErr(msg);
     }
   }

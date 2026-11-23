@@ -18,7 +18,7 @@ import ZephyrDocuments from '../../components/zephyr/ZephyrDocuments.jsx';
 import { LeaseForm, PaymentForm, TenantForm } from '../../components/zephyr/ZephyrRentForms.jsx';
 import { Detail, Empty, Section, card, dayOf, inputCls, labelCls, toBody, today } from '../../components/zephyr/formKit.jsx';
 import { PropertyForm } from './ZephyrPropertiesPage.jsx';
-import { confirmAction } from '../../lib/confirmAction.js';
+import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 
 const Actions = ({ saving, onCancel, label = 'Save' }) => (
   <div className="flex justify-end gap-2">
@@ -323,7 +323,7 @@ export default function ZephyrPropertyDetailPage() {
     }
   }
   async function endLease(l) {
-    const reason = window.prompt(`End the lease of ${l.tenant?.name}? Optionally say why:`, '');
+    const reason = await promptAction(`End the lease of ${l.tenant?.name}? Optionally say why:`, '');
     if (reason === null) return;
     if (await run(() => zephyrApi.endLease(l.id, { reason: reason.trim() || null }), 'Lease ended')) await refreshAll();
   }
@@ -368,7 +368,7 @@ export default function ZephyrPropertyDetailPage() {
     }
   }
   async function reverseSale(s) {
-    const reason = window.prompt('Why is this sale being reversed?');
+    const reason = await promptAction('Why is this sale being reversed?');
     if (!reason?.trim()) return;
     if (await run(() => zephyrApi.reverseSale(p.id, s.id, reason.trim()).then(() => load()), 'Sale reversed', 'Could not reverse')) await loadSales();
   }

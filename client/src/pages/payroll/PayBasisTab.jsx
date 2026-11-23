@@ -6,6 +6,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import DataTable from '../../components/ui/DataTable.jsx';
 import PeriodPicker, { currentPeriod, periodLabel } from '../../components/finance/PeriodPicker.jsx';
 import { cleanParams } from '../analytics/AttendanceSalaryTab.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const money = (n) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASIS = { timesheet: 'Timesheet hours', attendance: 'Attendance' };
@@ -37,7 +38,7 @@ export default function PayBasisTab({ people }) {
   useEffect(load, [period.period_month, period.period_year, JSON.stringify(people)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function setBasis(body, what) {
-    const reason = window.prompt(`${what}\nGive a reason (required):`);
+    const reason = await promptAction(`${what}\nGive a reason (required):`);
     if (reason === null) return;
     if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not changed'); return; }
     setBusy(true);

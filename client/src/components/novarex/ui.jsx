@@ -1,4 +1,5 @@
 import { novarexError } from '../../lib/novarex/api.js';
+import { promptAction } from '../../lib/confirmAction.js';
 
 // Shared form / layout primitives are the ones every vertical workspace uses; only the error helper is Novarex's own.
 export * from '../acconcy/ui.jsx';
@@ -13,7 +14,7 @@ export async function withReason(run) {
   } catch (e) {
     const msg = novarexError(e, '');
     if (/reason/i.test(msg)) {
-      const reason = window.prompt(`${msg}\n\nReason for this change:`);
+      const reason = await promptAction(`${msg}\n\nReason for this change:`);
       if (reason && reason.trim()) return run(reason.trim());
     }
     throw e;

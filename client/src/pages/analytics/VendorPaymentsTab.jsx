@@ -19,6 +19,7 @@ import { downloadFile, downloadFilePost } from '../../lib/downloadFile.js';
 import { GenerateInvoiceButton } from './ClientInvoices.jsx';
 import { cleanParams } from './AttendanceSalaryTab.jsx';
 import { BillToFields, billToPayload } from './ClientInvoices.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -333,7 +334,7 @@ function VendorInvoicesTable({ period, refreshKey, onEdit }) {
   const { data, loading, refresh } = useLiveData(() => apiClient.get('/billing/vendor-invoices', { params: period }).then((r) => r.data.data), { deps: [period.period_month, period.period_year, refreshKey] });
   // Admin delete of a whole vendor invoice (all its project rows), with a reason (audited).
   async function removeGroup(group) {
-    const reason = window.prompt(`Delete vendor invoice ${group.rows[0].invoice_number || ''} (${group.rows.length} project row${group.rows.length === 1 ? '' : 's'})? Give a reason (required):`);
+    const reason = await promptAction(`Delete vendor invoice ${group.rows[0].invoice_number || ''} (${group.rows.length} project row${group.rows.length === 1 ? '' : 's'})? Give a reason (required):`);
     if (reason === null) return;
     if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
     try {

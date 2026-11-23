@@ -5,6 +5,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import { useProjectOptions } from '../../lib/lookups.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import { promptAction } from '../../lib/confirmAction.js';
 
 // After an admin change: tell them when a finalized month now needs its
 // billing recalculated and re-invoiced.
@@ -17,7 +18,7 @@ export function financeNote(flagged) {
 /** Admin: delete any timesheet entry (any status, locked day or not), with a reason. */
 export async function adminDeleteEntry(entry, { pushError, pushSuccess, onDone }) {
   const who = entry.org_membership?.person?.name || 'this employee';
-  const reason = window.prompt(`Delete ${who}'s ${entry.hours}h on ${String(entry.date).slice(0, 10)}? Give a reason (required):`);
+  const reason = await promptAction(`Delete ${who}'s ${entry.hours}h on ${String(entry.date).slice(0, 10)}? Give a reason (required):`);
   if (reason === null) return;
   if (reason.trim().length < 3) { pushError('A reason of at least 3 characters is required', 'Not deleted'); return; }
   try {
