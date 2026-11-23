@@ -7,6 +7,8 @@ import { useLeaveDay } from '../../lib/useLeaveDay.js';
 import Badge from '../../components/ui/Badge.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
+import RichTextEditor from '../../components/ui/RichTextEditor.jsx';
+import RichTextView from '../../components/ui/RichTextView.jsx';
 import LeaveDayNotice from './LeaveDayNotice.jsx';
 
 const STATUS_LABEL = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' };
@@ -19,10 +21,11 @@ function RequestDrawer({ open, requireProject, projectOptions, onClose, onSubmit
   const { pushError, pushSuccess } = useAlerts();
   const [fields, setFields] = useState({ date: '', account_id: '', hours: '', reason: '' });
   const [saving, setSaving] = useState(false);
+  const [editorKey, setEditorKey] = useState(0); // reloads the editor empty each time the drawer opens
   const leave = useLeaveDay(open ? fields.date : null);
 
   useEffect(() => {
-    if (open) setFields({ date: '', account_id: '', hours: '', reason: '' });
+    if (open) { setFields({ date: '', account_id: '', hours: '', reason: '' }); setEditorKey((k) => k + 1); }
   }, [open]);
 
   function set(key, value) {
@@ -49,7 +52,9 @@ function RequestDrawer({ open, requireProject, projectOptions, onClose, onSubmit
     }
   }
 
-  const canSubmit = fields.date && fields.hours && fields.reason.trim() && (!requireProject || fields.account_id);
+  // the editor leaves tags behind when it looks empty ("<p><br></p>"): only real text counts
+  const reasonText = fields.reason.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+  const canSubmit = fields.date && fields.hours && reasonText && (!requireProject || fields.account_id);
 
   return (
     <Drawer
@@ -86,10 +91,12 @@ function RequestDrawer({ open, requireProject, projectOptions, onClose, onSubmit
           Target hours
           <input required type="number" min="0.5" max="24" step="0.5" value={fields.hours} onChange={(e) => set('hours', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
         </label>
-        <label className="block text-xs font-medium text-tertiary-600">
-          Reason
-          <textarea required rows={3} value={fields.reason} onChange={(e) => set('reason', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
-        </label>
+        <div className="block text-xs font-medium text-tertiary-600">
+          <span id="reg-reason-label">Reason</span>
+          <div className="mt-1" role="group" aria-labelledby="reg-reason-label" data-testid="reason-editor">
+            <RichTextEditor value={fields.reason} resetKey={editorKey} onChange={(html) => set('reason', html)} placeholder="Explain why the day needs a correction. You can format the text and write as much as you need." minHeight="10rem" />
+          </div>
+        </div>
       </form>
     </Drawer>
   );
@@ -135,7 +142,7 @@ export default function RegularisationSection({ requireProject = false, projectO
                   {String(r.date || r.timesheet_entry?.date || '').slice(0, 10)} · {r.target_hours ?? r.requested_change?.hours}h
                 </span>
                 <span className="text-tertiary-500"> {r.account?.name || r.timesheet_entry?.account?.name ? `· ${r.account?.name || r.timesheet_entry?.account?.name}` : ''}</span>
-                <p className="truncate text-xs text-tertiary-500">{r.reason}</p>
+                <RichTextView value={r.reason} className="max-h-16 overflow-hidden text-xs text-tertiary-500" />
                 {r.status === 'rejected' && r.decision_reason && <p className="text-xs text-danger-600">Manager: {r.decision_reason}</p>}
               </div>
               <Badge value={r.status} label={STATUS_LABEL[r.status]} />

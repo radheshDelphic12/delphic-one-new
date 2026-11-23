@@ -267,7 +267,8 @@ const createRegularizationRequestSchema = z.object({
   date: requiredDate,
   account_id: z.string().uuid().optional(),
   hours: z.coerce.number().positive().max(24),
-  reason: z.string().trim().min(1).max(500),
+  // written in the rich-text editor (HTML), no practical length limit
+  reason: z.string().trim().min(1).max(200000),
 });
 
 module.exports = {

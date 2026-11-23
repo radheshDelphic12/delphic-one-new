@@ -61,6 +61,7 @@ const ENTRY_ERRORS = {
   own_entry: [403, "You can't approve your own timesheet"],
   future_date: [422, "You can't log or regularise a future date"],
   not_locked: [422, "That day isn't locked — log it directly on your timesheet"],
+  reason_required: [422, 'Please write the reason'],
   duplicate_pending: [409, 'You already have a pending regularisation request for that date and project'],
   account_not_found: [404, 'Account not found'],
   requirement_not_found: [404, 'Requirement not found for that account'],

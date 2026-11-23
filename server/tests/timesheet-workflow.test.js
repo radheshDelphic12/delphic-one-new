@@ -314,6 +314,28 @@ describe('Timesheet Regularisation', () => {
     expect(mine.body.data[0].status).toBe('approved');
   });
 
+  test('the reason is rich text with no practical length limit; unsafe markup is stripped and an empty editor is refused', async () => {
+    const org = await createOrg();
+    const emp = await person(org);
+    await lockedWeek(org);
+    const proj = await project(org, emp.user.id, emp.membership);
+    const send = (date, reason) => authed(request(app).post('/api/v1/timesheets/regularization-requests'), emp.token).send({ date, account_id: proj.id, hours: 6, reason });
+
+    // an empty editor leaves tags behind: refused
+    expect((await send('2026-09-21', '<p><br></p>')).status).toBe(422);
+    // longer than the old 500 characters, with formatting; a script and an event handler are removed
+    const long = `<p><strong>Server down</strong> ${'x'.repeat(2500)}</p><ul><li>point one</li></ul><script>alert(1)</script><a href="https://example.com" onclick="evil()">link</a>`;
+    const ok = await send('2026-09-22', long);
+    expect(ok.status).toBe(201);
+    const saved = (await prisma.timesheetRegularizationTicket.findUnique({ where: { id: ok.body.data.id } })).reason;
+    expect(saved.length).toBeGreaterThan(2500);
+    expect(saved).toContain('<strong>Server down</strong>');
+    expect(saved).toContain('<li>point one</li>');
+    expect(saved).not.toMatch(/<script|onclick|alert\(1\)/);
+    // plain text still works
+    expect((await send('2026-09-23', 'Missed the deadline')).status).toBe(201);
+  });
+
   test('a rejected request creates nothing; a request on an approved leave day is accepted like any other', async () => {
     const org = await createOrg();
     const manager = await person(org);

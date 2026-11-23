@@ -8,6 +8,7 @@ const { computeDayRevenue } = require('../billing/billing.service');
 const { projectListWhere } = require('../../lib/projectScope');
 const { contractState } = require('../../lib/contractState');
 const { notify } = require('../../lib/notifications');
+const richText = require('../../lib/richText');
 const { asIst, todayIst } = require('../../lib/istDate');
 const { detectFinanceChange } = require('../../lib/financeChanges');
 const workHours = require('./workHours.service');
@@ -569,8 +570,10 @@ async function createTicket(orgId, entryId, requestedByUserId, { requested_chang
 // for a specific correction (date, project, target hours, reason). The
 // reporting manager is notified; on approval the entry is created/updated
 // even though the day is locked.
-async function createRegularizationRequest(orgId, orgMembershipId, userId, { date, account_id, hours, reason }) {
+async function createRegularizationRequest(orgId, orgMembershipId, userId, { date, account_id, hours, reason: rawReason }) {
   if (date > todayIst()) return { error: 'future_date' };
+  const reason = richText.cleanHtml(rawReason);
+  if (!richText.plainText(reason)) return { error: 'reason_required' };
   if (!(await isLocked(orgId, date))) return { error: 'not_locked' };
 
   if (!account_id) return { error: 'project_required' };
@@ -606,7 +609,7 @@ async function createRegularizationRequest(orgId, orgMembershipId, userId, { dat
 
   const person = await prisma.orgMembership.findUnique({ where: { id: orgMembershipId }, select: { person: { select: { name: true } } } });
   await notifyManager(orgId, orgMembershipId, 'timesheet_regularization_requested', userId, {
-    employeeName: person?.person?.name, hours, dateLabel: ymd(date), reason, accountName: account ? account.project_name || account.name : undefined,
+    employeeName: person?.person?.name, hours, dateLabel: ymd(date), reason: richText.plainText(reason).slice(0, 300), accountName: account ? account.project_name || account.name : undefined,
   });
   return { ticket };
 }

@@ -1,3 +1,4 @@
+import RichTextView from '../../components/ui/RichTextView.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ClipboardList, Download, Lock, Plus } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
@@ -392,7 +393,8 @@ export default function TeamMonitoringTab() {
               <li key={ticket.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
                 <span className="text-tertiary-700">
                   <b className="text-tertiary-900">{ticket.org_membership?.person?.name || ticket.requester?.name}</b>
-                  {ticket.date ? ` — ${String(ticket.date).slice(0, 10)} · ${ticket.target_hours}h` : ''} — {ticket.reason}
+                  {ticket.date ? ` — ${String(ticket.date).slice(0, 10)} · ${ticket.target_hours}h` : ''}
+                  <RichTextView value={ticket.reason} className="mt-0.5 text-tertiary-700" />
                 </span>
                 <span className="flex shrink-0 gap-2">
                   <button type="button" className="btn-secondary text-xs" onClick={() => decideTicket(ticket.id, 'approved')}>Approve</button>

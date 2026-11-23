@@ -1,3 +1,4 @@
+import RichTextView from '../../components/ui/RichTextView.jsx';
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
@@ -152,7 +153,7 @@ export default function ApprovalsTab() {
                   {rowTick('regularizations', t.id)}
                   <b className="text-tertiary-900">{t.org_membership?.person?.name || t.requester?.name}</b> — {String(t.date || t.timesheet_entry?.date || '').slice(0, 10)} · {t.target_hours ?? t.requested_change?.hours}h
                   {t.account?.name ? ` · ${t.account.name}` : ''}
-                  <span className="block text-xs text-tertiary-500">{t.reason}</span>
+                  <RichTextView value={t.reason} className="mt-0.5 text-xs text-tertiary-500" />
                 </span>
                 <span className="flex shrink-0 gap-2">
                   <button type="button" className="btn-secondary text-xs" onClick={() => decideRegularisation(t, 'approved')}>Approve</button>

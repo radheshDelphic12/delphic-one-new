@@ -1,3 +1,4 @@
+import RichTextView from '../../components/ui/RichTextView.jsx';
 import { useCallback, useEffect, useState } from 'react';
 import { FileClock } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
@@ -85,7 +86,7 @@ export default function RegularizationAdminTab({ onPendingChange }) {
     { key: 'date', header: 'Date', render: (r) => String(r.date || r.timesheet_entry?.date || '').slice(0, 10) || '-' },
     { key: 'project', header: 'Project', render: (r) => r.account?.project_name || r.account?.name || r.timesheet_entry?.account?.project_name || r.timesheet_entry?.account?.name || '-' },
     { key: 'hours', header: 'Hours', render: (r) => (r.target_hours != null ? `${r.target_hours}h` : '-') },
-    { key: 'reason', header: 'Reason', render: (r) => <span className="text-tertiary-700">{r.reason}</span> },
+    { key: 'reason', header: 'Reason', render: (r) => <RichTextView value={r.reason} className="min-w-[12rem] text-tertiary-700" /> },
     { key: 'status', header: 'Status', render: (r) => <Badge value={r.status} /> },
     { key: 'actions', header: '', render: (r) => <Actions row={r} onDecide={decide} /> },
   ];
