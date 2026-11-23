@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const exchangeRates = require('../billing/exchangeRates.service');
 
 // Group Dashboard > GST & TDS (docs/features/GROUP-TAX-TRACKING.md). Reads the invoices that already exist (Delphic's client invoices with their
 // contract charge lines, and the Book Keeping invoice generator) and tells, per invoice and per period: base amount, GST, TDS, what is payable and
@@ -595,7 +596,18 @@ async function setReceivableSetting(groupIds, user, { org_group_id: groupId, ena
  * GST and TDS still to collect, and what the group is left with: money in hand (banks + cash) minus the GST and TDS still to deposit, and the same
  * if every pending invoice were collected. Money figures are INR; other currencies show only in the table totals.
  */
-async function receivables(groupIds, { orgId, currency, from, to } = {}) {
+/** "USD:83.5, AED:22.7" -> Map(currency -> INR per unit); anything that is not a positive number is ignored. */
+function parseRates(text) {
+  const out = new Map();
+  for (const part of String(text || '').split(',')) {
+    const [cur, val] = part.split(':').map((x) => x && x.trim());
+    const n = Number(val);
+    if (/^[A-Z]{3}$/.test(cur || '') && cur !== 'INR' && Number.isFinite(n) && n > 0) out.set(cur, n);
+  }
+  return out;
+}
+
+async function receivables(groupIds, { orgId, currency, from, to, rates } = {}) {
   const { groups } = await receivableSetting(groupIds);
   const on = groups.filter((g) => g.enabled);
   if (!on.length) return { enabled: false, groups };
@@ -621,6 +633,58 @@ async function receivables(groupIds, { orgId, currency, from, to } = {}) {
   const tdsToDeposit = round2(Math.max(tdsPay.inr?.to_deposit || 0, 0) + Math.max(tdsPay.employees?.to_deposit || 0, 0));
   const freeNow = round2(inHand - gstToDeposit - tdsToDeposit);
   const wallets = await receivableWallets(onIds, inr);
+
+  // What is still to collect in every currency, and in INR: foreign amounts are converted at the rate typed on the screen, else the rate the
+  // company's finance set (Finance > exchange rates). A currency with no rate anywhere is listed but left out of the INR total.
+  const custom = parseRates(rates);
+  const saved = new Map();
+  for (const id of new Set(list.map((r) => r.org_id))) saved.set(id, await exchangeRates.inrRates(id));
+  const byCur = new Map();
+  for (const r of list) {
+    if (!(r.pending > 0)) continue;
+    const t = byCur.get(r.currency) || { currency: r.currency, pending: 0, gst: 0, inr: 0, unconverted: 0 };
+    const gstPart = r.total > 0 ? r.gst * (r.pending / r.total) : 0;
+    t.pending = round2(t.pending + r.pending);
+    t.gst = round2(t.gst + gstPart);
+    const rate = r.currency === 'INR' ? 1 : (custom.get(r.currency) ?? saved.get(r.org_id)?.get(r.currency) ?? null);
+    if (rate === null) t.unconverted = round2(t.unconverted + r.pending); else t.inr = round2(t.inr + r.pending * rate);
+    byCur.set(r.currency, t);
+  }
+  const toCollectByCurrency = [...byCur.values()].map((t) => ({
+    currency: t.currency, pending: t.pending, gst_in_pending: t.gst, pending_inr: round2(t.inr), unconverted: t.unconverted,
+    rate: t.currency === 'INR' ? 1 : (t.pending > 0 && t.unconverted < t.pending ? round2(t.inr / (t.pending - t.unconverted)) : null),
+    rate_source: t.currency === 'INR' ? null : custom.has(t.currency) ? 'typed' : t.unconverted >= t.pending ? 'none' : 'saved',
+  })).sort((a, b) => (a.currency === 'INR' ? -1 : b.currency === 'INR' ? 1 : a.currency.localeCompare(b.currency)));
+  const allInr = round2(toCollectByCurrency.reduce((s, t) => s + t.pending_inr, 0));
+
+  // The whole picture in INR (foreign currencies at the same rates): what was billed, what came in, what is still to come, and the TDS in its
+  // three states - deducted so far by clients (a claim on the tax department), received back, and not yet deducted (on invoices the client has
+  // not paid yet; it will be deducted when they pay, so it is not money to collect from the client).
+  const rateOfCurrency = (cur) => {
+    if (cur === 'INR') return 1;
+    if (custom.has(cur)) return custom.get(cur);
+    for (const m of saved.values()) if (m.has(cur)) return m.get(cur);
+    return null;
+  };
+  const toInrAll = (amount, cur) => { const rate = rateOfCurrency(cur); return rate === null ? 0 : amount * rate; };
+  const sumInr = (arr, pick) => round2(arr.reduce((a, x) => a + toInrAll(pick(x), x.currency), 0));
+  const tdsTotals = tdsRec.totals;
+  const billedInr = round2(list.reduce((a, r) => a + toInrAll(r.total + r.tds, r.currency), 0));
+  const receivedInr = round2(list.reduce((a, r) => a + toInrAll(r.paid, r.currency), 0));
+  const tdsBalance = {
+    expected: sumInr(tdsTotals, (t) => t.expected),
+    deducted: sumInr(tdsTotals, (t) => t.deducted),
+    received_back: sumInr(tdsTotals, (t) => t.received),
+    to_claim: sumInr(tdsTotals, (t) => t.outstanding),
+    yet_to_deduct: sumInr(tdsTotals, (t) => t.yet_to_deduct),
+  };
+  const gstBalance = { collected: round2(Number(gstView.totals?.collected || 0)), deposited: round2(Number(gstView.totals?.paid || 0) + Number(gstView.totals?.credits || 0)), to_deposit: round2(gstToDeposit) };
+  const netPosition = round2(freeNow + allInr + tdsBalance.to_claim);
+  const balance = {
+    billed: billedInr, received: receivedInr, to_collect: allInr, tds: tdsBalance, gst: gstBalance,
+    in_hand: round2(inHand), tds_to_deposit: tdsToDeposit, net_position: netPosition,
+    by_currency: toCollectByCurrency.filter((t) => t.currency !== 'INR').map((t) => ({ currency: t.currency, pending: t.pending, rate: t.rate, pending_inr: t.pending_inr })),
+  };
   return {
     enabled: true,
     wallets,
@@ -631,13 +695,16 @@ async function receivables(groupIds, { orgId, currency, from, to } = {}) {
     funds: {
       currency: 'INR',
       in_hand: round2(inHand),
-      to_collect: pendingInr,
+      to_collect: pendingInr, // INR invoices only
+      to_collect_all_inr: allInr, // every currency, foreign ones converted
+      to_collect_by_currency: toCollectByCurrency,
+      balance,
       gst_in_pending: gstPending,
       tds_to_receive: round2(tdsOutstanding),
       gst_to_deposit: round2(gstToDeposit),
       tds_to_deposit: tdsToDeposit,
       left_now: freeNow,
-      left_after_collection: round2(freeNow + pendingInr),
+      left_after_collection: round2(freeNow + allInr),
     },
   };
 }

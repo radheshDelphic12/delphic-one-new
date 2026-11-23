@@ -38,10 +38,16 @@ const updateClaimSchema = z
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Provide at least one field to update' })
   .refine(durationOk, DURATION_ERR);
 
-const decideClaimSchema = z.object({
-  status: z.enum(['approved', 'rejected']),
-  reason: z.string().max(500).optional(),
-});
+// A rejection always carries a reason (the employee sees it); an approval may carry a note.
+const decideClaimSchema = z
+  .object({
+    status: z.enum(['approved', 'rejected']),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => v.status !== 'rejected' || (v.reason && v.reason.length >= 3), { message: 'Give a reason for the rejection (at least 3 characters)', path: ['reason'] });
+
+// Approving a rejected claim back: a note is optional.
+const reapproveClaimSchema = z.object({ reason: z.string().trim().max(500).optional() });
 
 // Filters (combinable): month (expense date, else the submission date for
 // older claims), category, office — plus employee on the admin list.
@@ -104,6 +110,7 @@ module.exports = {
   createClaimSchema,
   updateClaimSchema,
   decideClaimSchema,
+  reapproveClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
   listApprovalsQuerySchema,

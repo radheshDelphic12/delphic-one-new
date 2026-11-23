@@ -8,6 +8,7 @@ const CLAIM_INCLUDE = {
   location: { select: { id: true, name: true } },
   category_ref: { select: { id: true, name: true } },
   submitter: { select: { id: true, name: true } },
+  decider: { select: { id: true, name: true } }, // who approved / rejected it (shown with the rejection reason)
 };
 
 // "Other" — not one of the admin-managed categories; needs a description.
@@ -194,6 +195,23 @@ async function decideClaim(orgId, claimId, user, { status, reason }) {
   return { claim: updated };
 }
 
+// A rejected claim approved back (admin only, enforced by the route): it becomes approved again, ready to reimburse. The rejection stays in
+// the `approvals` log, with a new entry saying it was approved back and why; the old rejection reason is cleared from the claim itself.
+async function reapproveClaim(orgId, claimId, user, { reason } = {}) {
+  const claim = await prisma.expenseClaim.findFirst({ where: { id: claimId, org_id: orgId } });
+  if (!claim) return { error: 'not_found' };
+  if (claim.status !== 'rejected') return { error: 'not_rejected' };
+  const actor = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } });
+  const now = new Date();
+  const approvals = [...(Array.isArray(claim.approvals) ? claim.approvals : []), { stage: 'finance', status: 'approved', reapproved: true, by: user.id, name: actor?.name || null, at: now.toISOString(), reason: reason || null, admin: true }];
+  const updated = await prisma.expenseClaim.update({
+    where: { id: claimId },
+    data: { status: 'approved', approval_stage: null, approvals, decided_by: user.id, decided_at: now, decision_reason: null },
+    include: CLAIM_INCLUDE,
+  });
+  return { claim: updated };
+}
+
 // Only reachable from 'approved' — the money is actually paid out here,
 // a separate step from the approve/reject decision.
 async function reimburseClaim(orgId, claimId, ctx = {}) {
@@ -335,6 +353,7 @@ module.exports = {
   listClaims,
   listApprovals,
   decideClaim,
+  reapproveClaim,
   reimburseClaim,
   undoReimbursement,
   undoVendorPaymentPaid,

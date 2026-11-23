@@ -35,6 +35,12 @@ function ClaimStatus({ row }) {
     <span className="inline-flex flex-col gap-0.5">
       <Badge value={row.status} />
       {row.status === 'pending' && row.approval_stage && <span className="text-[11px] text-tertiary-500">Awaiting {STAGE_LABEL[row.approval_stage]}</span>}
+      {row.status === 'rejected' && (
+        <span className="block max-w-[16rem] text-[11px] text-danger-600" data-testid="rejection-reason">
+          {row.decision_reason ? <>Rejected: {row.decision_reason}</> : <>Rejected (no reason was recorded)</>}
+          {row.decider?.name && <span className="block text-tertiary-500">by {row.decider.name}</span>}
+        </span>
+      )}
     </span>
   );
 }
@@ -342,6 +348,7 @@ export default function ExpensesTab() {
   }
 
   async function decide(row, status) {
+    if (status === 'rejected') { setRejecting([row]); return; }
     try {
       const { data } = await apiClient.post(`/expenses/claims/${row.id}/decision`, { status });
       const next = data.data?.status === 'pending' && data.data?.approval_stage;
@@ -355,6 +362,8 @@ export default function ExpensesTab() {
 
   // Multi approve / reject: tick claims (or all), then decide them together —
   // one decision each, so every claim still goes through its own step check.
+  const [rejecting, setRejecting] = useState(null); // claims about to be rejected (the reason box is open)
+  const [reapproving, setReapproving] = useState(null); // a rejected claim about to be approved back
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   useEffect(() => { setSelectedIds([]); }, [view, rows]);
@@ -364,8 +373,8 @@ export default function ExpensesTab() {
     if (!pending.length) { pushInfo('None of the selected claims are pending'); return; }
     let reason;
     if (status === 'rejected') {
-      reason = window.prompt(`Reject ${pending.length} claim${pending.length === 1 ? '' : 's'}? Give a reason (shown to the employee):`);
-      if (reason === null) return;
+      setRejecting(pending); // the reason box asks for the reason and does the rejecting
+      return;
     } else if (!await confirmAction(`Approve ${pending.length} claim${pending.length === 1 ? '' : 's'}?`)) return;
     setBulkBusy(true);
     let failed = 0;
@@ -441,6 +450,7 @@ export default function ExpensesTab() {
               <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => decide(row, 'rejected')}>Reject</button>
             </>
           )}
+          {isAdmin && row.status === 'rejected' && <button type="button" className="btn-ghost text-xs" onClick={() => setReapproving(row)}>Approve back</button>}
           {isAdmin && row.status === 'approved' && <button type="button" className="btn-ghost text-xs" onClick={() => reimburse(row)}>Mark reimbursed</button>}
           {user?.is_group_superadmin && row.status === 'reimbursed' && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setUndoClaim(row)}>Undo reimbursement</button>}
         </div>
@@ -461,6 +471,45 @@ export default function ExpensesTab() {
   return (
     <div className="space-y-4">
       {paymentDialog.dialog}
+      <UndoReasonModal
+        open={Boolean(rejecting)}
+        title={rejecting?.length === 1 ? 'Reject this claim' : `Reject ${rejecting?.length || 0} claims`}
+        description="The employee sees this reason next to the claim, so they know why it was rejected. An admin can approve it back later."
+        fieldLabel="Reason for rejection (shown to the employee)"
+        confirmLabel="Reject"
+        onClose={() => setRejecting(null)}
+        onConfirm={async (reason) => {
+          let done = 0;
+          let lastError;
+          for (const row of rejecting) {
+            try { await apiClient.post(`/expenses/claims/${row.id}/decision`, { status: 'rejected', reason }); done += 1; } catch (err) { lastError = err; }
+          }
+          if (!done) throw lastError || new Error('Could not reject');
+          const skipped = rejecting.length - done;
+          setRejecting(null);
+          setSelectedIds([]);
+          if (skipped) pushError(`${done} rejected; ${skipped} could not be rejected (not your step, or already decided).`, 'Some claims were skipped');
+          else pushInfo(`${done} claim${done === 1 ? '' : 's'} rejected`);
+          load();
+          apiClient.get('/expenses/claims/approvals').then(({ data: q }) => setApprovalCount((q.data || []).length)).catch(() => {});
+        }}
+      />
+      <UndoReasonModal
+        open={Boolean(reapproving)}
+        title="Approve this claim back"
+        description="The claim goes back to approved so it can be reimbursed. The earlier rejection and its reason stay in the claim's history."
+        fieldLabel="Note (optional)"
+        confirmLabel="Approve"
+        confirmClass="btn-primary"
+        minLength={0}
+        onClose={() => setReapproving(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/expenses/claims/${reapproving.id}/reapprove`, reason ? { reason } : {});
+          setReapproving(null);
+          pushInfo('Claim approved back');
+          load();
+        }}
+      />
       <UndoReasonModal
         open={Boolean(undoClaim)}
         title="Undo this reimbursement"

@@ -28,16 +28,125 @@ function Tile({ label, value, hint, tone = '' }) {
   );
 }
 
+function Line({ label, value, hint, strong = false, tone = '' }) {
+  return (
+    <div className={`flex items-baseline justify-between gap-3 py-1 text-sm ${strong ? 'font-semibold' : ''}`}>
+      <span className="text-tertiary-700">{label}{hint && <span className="block text-[11px] font-normal text-tertiary-500">{hint}</span>}</span>
+      <span className={`tabular-nums ${tone}`}>{value}</span>
+    </div>
+  );
+}
+
+/** The whole group's position in INR: client money, TDS in its three states, GST, and what is left overall. An option: it can be hidden. */
+function GroupBalance({ funds }) {
+  const b = funds.balance;
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('delphic_recv_balance') !== '0'; } catch { return true; } });
+  const toggle = () => setOpen((v) => { const n = !v; try { localStorage.setItem('delphic_recv_balance', n ? '1' : '0'); } catch { /* storage blocked */ } return n; });
+  if (!b) return null;
+  const foreign = (b.by_currency || []).filter((c) => c.pending > 0);
+  return (
+    <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="group-balance">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-heading text-sm font-semibold text-tertiary-900">Group balance (INR)</h3>
+          <p className="text-xs text-tertiary-500">Client money, TDS and GST together: what has come in, what is still to come, and what the group is left with. Foreign currencies are converted at the rates below.</p>
+        </div>
+        <button type="button" className="rounded-lg border border-tertiary-200 px-3 py-1.5 text-sm text-tertiary-700" aria-expanded={open} onClick={toggle}>{open ? 'Hide balance' : 'Show balance'}</button>
+      </div>
+      {open && (
+        <div className="mt-3 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border border-tertiary-100 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Client money</p>
+            <Line label="Billed" hint="Invoice value before TDS" value={money(b.billed)} />
+            <Line label="Received from clients" value={money(b.received)} />
+            <Line label="Still to collect" hint="After the TDS clients will deduct" value={money(b.to_collect)} strong />
+            {foreign.map((c) => <Line key={c.currency} label={`of which ${c.currency}`} hint={c.rate ? `at 1 ${c.currency} = ₹${c.rate}` : 'no rate set'} value={`${money(c.pending, c.currency)} = ${money(c.pending_inr)}`} />)}
+          </div>
+          <div className="rounded-xl border border-tertiary-100 p-3" data-testid="balance-tds">
+            <p className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">TDS on our invoices</p>
+            <Line label="Total TDS clients will deduct" value={money(b.tds.expected)} />
+            <Line label="Deducted so far" hint="On the invoices clients have paid" value={money(b.tds.deducted)} />
+            <Line label="Refund received" value={money(b.tds.received_back)} />
+            <Line label="Still to claim back" hint="Deducted, refund awaited" value={money(b.tds.to_claim)} strong />
+            <Line label="Not deducted yet" hint="Unpaid invoices: deducted when the client pays" value={money(b.tds.yet_to_deduct)} strong />
+          </div>
+          <div className="rounded-xl border border-tertiary-100 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">GST and what is left</p>
+            <Line label="GST collected" value={money(b.gst.collected)} />
+            <Line label="GST deposited" value={money(b.gst.deposited)} />
+            <Line label="GST still to deposit" value={money(b.gst.to_deposit)} strong />
+            <Line label="TDS still to deposit" hint="Employees + vendors" value={money(b.tds_to_deposit)} />
+            <Line label="Money in hand" value={money(b.in_hand)} />
+            <div className="mt-1 border-t border-tertiary-100 pt-1">
+              <Line label="Overall balance" hint="In hand + to collect + TDS to claim - GST and TDS to deposit" value={money(b.net_position)} strong tone={b.net_position < 0 ? 'text-danger-600' : ''} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What is still to collect in each currency, with the conversion rate used for INR (typed here, else the saved rate) and the INR total. */
+function CurrencyCollect({ funds, rates, onRates }) {
+  const list = funds.to_collect_by_currency || [];
+  const foreign = list.filter((c) => c.currency !== 'INR');
+  const [draft, setDraft] = useState({});
+  useEffect(() => { setDraft(Object.fromEntries(String(rates || '').split(',').map((p) => p.split(':').map((x) => x.trim())).filter((p) => p[0] && p[1]))); }, [rates]);
+  if (list.length === 0) return null;
+  const apply = () => onRates(Object.entries(draft).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${k}:${Number(v)}`).join(','));
+  return (
+    <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="receivable-by-currency">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-heading text-sm font-semibold text-tertiary-900">To collect, by currency</h3>
+          <p className="text-xs text-tertiary-500">What clients still owe in each currency, and its value in INR. Leave a rate empty to use the rate finance has saved; type one to use your own.</p>
+        </div>
+        {foreign.length > 0 && (
+          <div className="flex gap-2">
+            <button type="button" className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white" onClick={apply}>Apply rates</button>
+            {rates && <button type="button" className="rounded-lg border border-tertiary-200 px-3 py-1.5 text-sm text-tertiary-700" onClick={() => onRates('')}>Use saved rates</button>}
+          </div>
+        )}
+      </div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {list.map((c) => (
+          <div key={c.currency} className="rounded-xl border border-tertiary-100 p-3" data-testid="currency-card">
+            <p className="text-xs font-medium text-tertiary-500">{c.currency}</p>
+            <p className="font-heading text-lg font-semibold tabular-nums">{money(c.pending, c.currency)}</p>
+            {c.currency !== 'INR' && (
+              <div className="mt-1 space-y-1 text-[11px] text-tertiary-600">
+                <label className="flex items-center gap-1.5">1 {c.currency} = ₹
+                  <input type="number" min="0" step="0.0001" aria-label={`Rate for ${c.currency}`} className="w-24 rounded-md border border-tertiary-200 px-1.5 py-0.5 text-xs tabular-nums" placeholder={c.rate_source === 'none' ? 'set rate' : String(c.rate)} value={draft[c.currency] ?? ''} onChange={(e) => setDraft((d) => ({ ...d, [c.currency]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') apply(); }} />
+                </label>
+                <p>{c.rate_source === 'none' ? <span className="text-warning-700">No rate set - not in the INR total</span> : <>= {money(c.pending_inr)} <span className="text-tertiary-400">({c.rate_source === 'typed' ? 'your rate' : 'saved rate'})</span></>}</p>
+                {c.unconverted > 0 && c.rate_source !== 'none' && <p className="text-warning-700">{money(c.unconverted, c.currency)} has no rate</p>}
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-3">
+          <p className="text-xs font-medium text-tertiary-500">Total in INR</p>
+          <p className="font-heading text-lg font-semibold tabular-nums">{money(funds.to_collect_all_inr)}</p>
+          <p className="mt-1 text-[11px] text-tertiary-600">All currencies, foreign ones converted</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GroupReceivablesView() {
   const { pushError, pushSuccess } = useAlerts();
   const [from, setFrom] = useState('');
   const [pendingOnly, setPendingOnly] = useState(true);
   const [query, setQuery] = useState('');
   const [data, setData] = useState(null);
+  // Conversion rates typed for this screen ("USD:83.5,AED:22.7"), remembered in this browser. Empty = the rate finance has saved for each company.
+  const [rates, setRates] = useState(() => { try { return localStorage.getItem('delphic_recv_rates') || ''; } catch { return ''; } });
 
   const load = useCallback(() => {
-    apiClient.get('/group-tax/receivables', { params: from ? { from } : {} }).then(({ data: res }) => setData(res.data)).catch((err) => { setData({ enabled: false, groups: [] }); pushError(apiErrorMessage(err, 'Could not load the receivables'), 'Load failed'); });
-  }, [from]); // eslint-disable-line react-hooks/exhaustive-deps
+    apiClient.get('/group-tax/receivables', { params: { ...(from ? { from } : {}), ...(rates ? { rates } : {}) } }).then(({ data: res }) => setData(res.data)).catch((err) => { setData({ enabled: false, groups: [] }); pushError(apiErrorMessage(err, 'Could not load the receivables'), 'Load failed'); });
+  }, [from, rates]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
 
   const rows = useMemo(() => {
@@ -75,14 +184,19 @@ export function GroupReceivablesView() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="receivable-funds">
-        <Tile label="To collect from clients" value={money(f.to_collect)} hint={`of which GST ${money(f.gst_in_pending)}`} />
-        <Tile label="TDS to receive (claim)" value={money(f.tds_to_receive)} hint="Deducted by clients, not yet received back" />
+        <Tile label="To collect from clients (in INR)" value={money(f.to_collect_all_inr ?? f.to_collect)} hint={(f.to_collect_by_currency || []).some((c) => c.currency !== 'INR') ? 'Foreign currencies converted at the rates below' : `of which GST ${money(f.gst_in_pending)}`} />
+        <Tile label="TDS to claim back (already deducted)" value={money(f.tds_to_receive)} hint="Deducted by clients on paid invoices, refund not yet received" />
+        <Tile label="TDS not deducted yet" value={money(f.balance?.tds?.yet_to_deduct ?? 0)} hint="On unpaid invoices - clients deduct it when they pay" />
         <Tile label="GST still to deposit" value={money(f.gst_to_deposit)} hint="Collected on invoices minus deposited" />
         <Tile label="TDS still to deposit" value={money(f.tds_to_deposit)} hint="Employees + vendors" />
         <Tile label="Money in hand" value={money(f.in_hand)} hint="All bank accounts and cash (INR)" />
         <Tile label="Left now" value={money(f.left_now)} hint="In hand - GST to deposit - TDS to deposit" tone={f.left_now < 0 ? 'border-danger-200' : ''} />
         <Tile label="Left after collecting" value={money(f.left_after_collection)} hint="Left now + everything to collect" />
       </div>
+
+      <GroupBalance funds={f} />
+
+      <CurrencyCollect funds={f} rates={rates} onRates={(v) => { setRates(v); try { localStorage.setItem('delphic_recv_rates', v); } catch { /* storage blocked */ } }} />
 
       {(data.wallets || []).length > 0 && (
         <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="receivable-wallets">

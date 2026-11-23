@@ -92,6 +92,7 @@ describe('Phase 7 — expense claims', () => {
 
     const redecide = await authed(request(app).post(`/api/v1/expenses/claims/${id}/decision`), adminToken).send({
       status: 'rejected',
+      reason: 'Changed my mind',
     });
     expect(redecide.status).toBe(409);
 
@@ -120,6 +121,35 @@ describe('Phase 7 — expense claims', () => {
 
     const reimburse = await authed(request(app).post(`/api/v1/expenses/claims/${claim.body.data.id}/reimburse`), adminToken);
     expect(reimburse.status).toBe(422);
+  });
+
+  test('a rejection must give a reason; a rejected claim can be approved back and then reimbursed', async () => {
+    const { org, access_token: adminToken } = await seedOrgAdmin();
+    const { access_token: empToken } = await seedOrgEmployee(org);
+    const location = await seedLocation(org.id);
+    const claim = await authed(request(app).post('/api/v1/expenses/claims'), empToken).send({ location_id: location.id, category: 'Personal', amount: 250 });
+    const id = claim.body.data.id;
+    const decide = (body) => authed(request(app).post(`/api/v1/expenses/claims/${id}/decision`), adminToken).send(body);
+
+    expect((await decide({ status: 'rejected' })).status).toBe(422);
+    expect((await decide({ status: 'rejected', reason: '  ' })).status).toBe(422);
+    expect((await decide({ status: 'rejected', reason: 'ok' })).status).toBe(422);
+    expect((await decide({ status: 'rejected', reason: 'Receipt missing' })).status).toBe(200);
+
+    // an employee cannot approve it back, and only a rejected claim can be approved back
+    expect((await authed(request(app).post(`/api/v1/expenses/claims/${id}/reapprove`), empToken).send({})).status).toBe(403);
+    const back = await authed(request(app).post(`/api/v1/expenses/claims/${id}/reapprove`), adminToken).send({ reason: 'Receipt received' });
+    expect(back.status).toBe(200);
+    expect(back.body.data).toMatchObject({ status: 'approved', decision_reason: null });
+    const log = back.body.data.approvals;
+    expect(log.map((e) => e.status)).toEqual(['rejected', 'approved']);
+    expect(log[0].reason).toBe('Receipt missing');
+    expect(log[1]).toMatchObject({ reapproved: true, reason: 'Receipt received' });
+    expect((await authed(request(app).post(`/api/v1/expenses/claims/${id}/reapprove`), adminToken).send({})).status).toBe(409);
+
+    const reimburse = await authed(request(app).post(`/api/v1/expenses/claims/${id}/reimburse`), adminToken);
+    expect(reimburse.status).toBe(200);
+    expect(reimburse.body.data.status).toBe('reimbursed');
   });
 
   test('an employee sees only their own claims; admin sees the whole team', async () => {

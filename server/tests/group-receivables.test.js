@@ -103,8 +103,48 @@ describe('Book Keeping receivables', () => {
     expect(d.funds.gst_to_deposit).toBe(72000);
     expect(d.funds.left_now).toBe(-72000);
     expect(d.funds.left_after_collection).toBe(232000);
+    // the whole-group balance: billed / received / to collect, TDS in its three states, GST and the net position
+    expect(d.funds.balance).toMatchObject({ billed: 354000, received: 50000, to_collect: 304000, in_hand: 0, net_position: 232000 });
+    expect(d.funds.balance.tds).toMatchObject({ expected: 0, deducted: 0, received_back: 0, to_claim: 0, yet_to_deduct: 0 });
+    expect(d.funds.balance.gst).toMatchObject({ collected: 72000, deposited: 0, to_deposit: 72000 });
     // a later start month drops the September-billed invoice
     expect(numbers(await get('/receivables', { from: '2026-10' }))).toEqual(['INV-OCT']);
+  });
+});
+
+describe('receivables in other currencies', () => {
+  const usdInvoice = (number, amount) => prisma.clientInvoice.create({
+    data: {
+      org_id: alpha.id, client_account_id: client.id, period_month: 10, period_year: 2026, amount, currency: 'USD', status: 'sent', invoice_number: number, invoice_date: new Date('2026-10-20'), created_by: superUser.id,
+      line_items: { project: { name: 'Ginnar Project', client_name: 'Ginnar Tech' }, details: { subtotal: amount, charges: [], total_amount: amount } },
+    },
+  });
+
+  test('to collect is listed per currency; foreign amounts are converted to INR at the typed rate, else the saved rate, else left out', async () => {
+    await seed();
+    await usdInvoice('INV-USD', 1000);
+    await put('/receivable-setting', { org_group_id: group.id, enabled: true, since_month: '2026-09' });
+    const usd = (res) => res.body.data.funds.to_collect_by_currency.find((c) => c.currency === 'USD');
+
+    // no rate anywhere: the dollars are listed but not in the INR total
+    let res = await get('/receivables');
+    expect(usd(res)).toMatchObject({ pending: 1000, pending_inr: 0, rate_source: 'none', unconverted: 1000 });
+    expect(res.body.data.funds.to_collect_all_inr).toBe(304000);
+
+    // a rate typed on the screen
+    res = await get('/receivables', { rates: 'USD:80' });
+    expect(usd(res)).toMatchObject({ pending: 1000, pending_inr: 80000, rate: 80, rate_source: 'typed', unconverted: 0 });
+    expect(res.body.data.funds.to_collect_all_inr).toBe(384000);
+    expect(res.body.data.funds.to_collect).toBe(304000); // INR invoices only, as before
+    expect(res.body.data.funds.left_after_collection).toBe(384000 - 72000);
+
+    // the rate finance saved for the company is the default; a typed rate wins over it
+    await prisma.exchangeRate.create({ data: { org_id: alpha.id, currency: 'USD', rate_to_inr: 83 } });
+    res = await get('/receivables');
+    expect(usd(res)).toMatchObject({ pending_inr: 83000, rate: 83, rate_source: 'saved' });
+    res = await get('/receivables', { rates: 'USD:85, junk, AED:abc' });
+    expect(usd(res)).toMatchObject({ pending_inr: 85000, rate_source: 'typed' });
+    expect(res.body.data.funds.to_collect_by_currency.map((c) => c.currency)).toEqual(['INR', 'USD']);
   });
 });
 

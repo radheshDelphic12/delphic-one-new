@@ -9,6 +9,7 @@ const {
   createClaimSchema,
   updateClaimSchema,
   decideClaimSchema,
+  reapproveClaimSchema,
   listMyClaimsQuerySchema,
   listClaimsQuerySchema,
   listApprovalsQuerySchema,
@@ -34,6 +35,7 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   already_decided: [409, 'Already decided'],
   not_approved: [422, 'Must be approved first'],
+  not_rejected: [409, 'Only a rejected claim can be approved back'],
   financial_locked: [423, 'This month is financially locked - reopen the financial lock (Live Analytics > Financials) before changing its invoices or payments'],
   not_editable: [409, 'Only a pending claim can be edited — this one has already been decided'],
   category_not_found: [404, 'Expense category not found (or deactivated)'],
@@ -157,6 +159,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = decideClaimSchema.parse(req.body);
     const result = await service.decideClaim(req.user.org_id, req.params.id, req.user, body);
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result.claim);
+  })
+);
+
+// A rejected claim approved back, so it can be reimbursed (admin only). The rejection stays in the claim's history.
+router.post(
+  '/claims/:id/reapprove',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const body = reapproveClaimSchema.parse(req.body || {});
+    const result = await service.reapproveClaim(req.user.org_id, req.params.id, req.user, body);
     if (result.error) return failFor(res, result.error);
     return ok(res, result.claim);
   })

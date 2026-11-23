@@ -22,6 +22,8 @@ const KINDS = Object.keys(service.KIND_LABEL);
 
 const filters = z.object({ from: month.optional(), to: month.optional(), org_id: uuid.optional(), currency: z.enum(['INR', 'USD', 'AED', 'SAR', 'EUR', 'GBP']).optional(), basis: z.enum(['invoice', 'billing']).optional() });
 const gstQuery = filters.extend({ by: z.enum(['month', 'quarter']).default('month') });
+// receivables may carry the conversion rates the viewer typed, as "USD:83.5,AED:22.7" (INR per unit)
+const receivablesQuery = filters.extend({ rates: z.string().max(200).optional() });
 const challanQuery = filters.extend({ kind: z.enum(KINDS).optional() });
 const rename = (q) => ({ ...q, orgId: q.org_id });
 
@@ -96,7 +98,7 @@ router.put('/receivable-setting', asyncHandler(async (req, res) => {
   const result = await service.setReceivableSetting(req.user.org_group_ids, req.user, receivableBody.parse(req.body));
   return result.error ? problem(res, result) : ok(res, result);
 }));
-router.get('/receivables', asyncHandler(async (req, res) => ok(res, await service.receivables(req.user.org_group_ids, rename(filters.parse(req.query))))));
+router.get('/receivables', asyncHandler(async (req, res) => ok(res, await service.receivables(req.user.org_group_ids, rename(receivablesQuery.parse(req.query))))));
 router.post('/receivables/sync-wallet', asyncHandler(async (req, res) => {
   const body = z.object({ wallet_id: uuid.optional(), from: month.optional() }).parse(req.body || {});
   const result = await service.syncReceivableWallets(req.user.org_group_ids, req.user, { walletId: body.wallet_id, from: body.from });
