@@ -605,6 +605,54 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await authed(request(app).post('/api/v1/billing/invoices'), ctx.adminToken).send({ client_account_id: p2.id, ...AUG })).status).toBe(201);
   });
 
+  test('cancel: needs a reason, leaves the list and the totals, shows in the Cancelled list with month and contract, and the month can be invoiced again', async () => {
+    const ctx = await seed();
+    const p1 = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 100000 });
+    const api = (m, url) => authed(request(app)[m](`/api/v1/billing${url}`), ctx.adminToken);
+    const inv = (await api('post', '/invoices').send({ client_account_id: p1.id, ...AUG })).body.data;
+    expect((await api('post', `/invoices/${inv.id}/status`).send({ status: 'sent' })).status).toBe(200);
+
+    // a reason is always required
+    expect((await api('post', `/invoices/${inv.id}/cancel`).send({})).status).toBe(422);
+    expect((await api('post', `/invoices/${inv.id}/cancel`).send({ reason: 'ab' })).status).toBe(422);
+    // only admins
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).post(`/api/v1/billing/invoices/${inv.id}/cancel`), (await loginAs(emp)).access_token).send({ reason: 'sneaky one' })).status).toBeGreaterThanOrEqual(401);
+
+    const done = await api('post', `/invoices/${inv.id}/cancel`).send({ reason: 'Wrong contract picked' });
+    expect(done.status).toBe(200);
+    // gone from the list, but listed as cancelled with the original number, month, contract, who and why
+    const list = await api('get', `/invoices?period_month=${AUG.period_month}&period_year=${AUG.period_year}`);
+    expect(list.body.data.map((r) => r.id)).not.toContain(inv.id);
+    const cancelled = (await api('get', `/invoices-cancelled?period_month=${AUG.period_month}&period_year=${AUG.period_year}`)).body.data;
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0]).toMatchObject({ id: inv.id, invoice_number: inv.invoice_number, period_month: AUG.period_month, period_year: AUG.period_year, cancel_reason: 'Wrong contract picked', status_when_cancelled: 'sent' });
+    expect(cancelled[0].contracts).toContain('Acme Support');
+    expect(cancelled[0].cancelled_by_name).toBeTruthy();
+    // another month's list does not show it
+    expect((await api('get', '/invoices-cancelled?period_month=1&period_year=2020')).body.data).toHaveLength(0);
+    // the same month and contract can be invoiced again
+    const again = await api('post', '/invoices').send({ client_account_id: p1.id, ...AUG });
+    expect(again.status).toBe(201);
+    expect(again.body.data.id).not.toBe(inv.id);
+    const audit = await prisma.auditLog.findFirst({ where: { org_id: ctx.org.id, action: 'client_invoice_cancel', entity_id: inv.id } });
+    expect(audit).toMatchObject({ reason: 'Wrong contract picked' });
+  });
+
+  test('cancel is refused while the invoice has payments', async () => {
+    const ctx = await seed();
+    const p1 = await project(ctx, { name: 'Acme Support', client: ctx.acme, rate: 100000 });
+    const api = (m, url) => authed(request(app)[m](`/api/v1/billing${url}`), ctx.adminToken);
+    const inv = (await api('post', '/invoices').send({ client_account_id: p1.id, ...AUG })).body.data;
+    await api('post', `/invoices/${inv.id}/status`).send({ status: 'sent' });
+    const paid = await api('post', `/invoices/${inv.id}/payments`).send({ amount: 1000, paid_on: '2026-09-05' });
+    expect(paid.status).toBeLessThan(300);
+    const res = await api('post', `/invoices/${inv.id}/cancel`).send({ reason: 'Client changed plan' });
+    expect(res.status).toBe(409);
+    expect((await api('get', `/invoices/${inv.id}`)).status).toBe(200); // still there
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

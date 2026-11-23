@@ -30,6 +30,8 @@ const {
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
   deleteInvoiceSchema,
+  cancelInvoiceSchema,
+  cancelledListQuerySchema,
   contractChargeSchema,
   updateContractChargeSchema,
   billingAdjustmentSchema,
@@ -100,6 +102,8 @@ const ERRORS = {
   exchange_rate_missing: [422, 'No exchange rate is set for that currency - add it under Finance exchange rates'],
   percent_too_large: [422, 'A percentage cannot be above 100'],
   reason_required: [422, 'Give a reason to change an invoice that has already been sent or paid'],
+  cancel_reason_required: [422, 'Say why the invoice is cancelled (at least 3 characters)'],
+  cancel_has_payments: [409, 'This invoice has payments recorded. Undo its payments first (Payments), then cancel it'],
   invoice_number_taken: [409, 'Another invoice already uses that invoice number'],
   nothing_to_invoice: [422, 'Nothing to invoice for that month — the amount is zero'],
   no_billing_rate: [422, 'This project has no billing rate for that month'],
@@ -735,6 +739,25 @@ router.get(
     if (result.error) return failFor(res, result.error);
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${String(result.invoice.invoice_number || 'invoice').replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
     return res.send(await invoicePdf.clientInvoicePdf(req.user.org_id, result.invoice));
+  })
+);
+
+// Cancelled invoices (which invoice, month and contracts, who cancelled it and why). Before the /:id routes so "cancelled" is not read as an id.
+router.get(
+  '/invoices-cancelled',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => ok(res, await invoices.listCancelledInvoices(req.user.org_id, cancelledListQuerySchema.parse(req.query))))
+);
+
+router.post(
+  '/invoices/:id/cancel',
+  requireOrgMembership,
+  canMethod('financials', 'admin'),
+  asyncHandler(async (req, res) => {
+    const result = await invoices.cancelClientInvoice(req.user.org_id, req.user, req.params.id, cancelInvoiceSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error, result);
+    return ok(res, { cancelled: true });
   })
 );
 

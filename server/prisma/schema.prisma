@@ -1752,6 +1752,12 @@ model ClientInvoice {
   deleted_at             DateTime?
   deleted_by             String?             @db.Uuid
   delete_reason          String?
+  // A cancelled invoice is soft-deleted (so it drops out of every total and the same month can be invoiced again) AND marked here, so the
+  // Cancelled list can show which invoice, month and contracts it was and why. cancelled_number keeps the original invoice number.
+  cancelled_at           DateTime?
+  cancelled_by           String?             @db.Uuid
+  cancel_reason          String?
+  cancelled_number       String?
 
   // One invoice per project and month is enforced in invoices.service for monthly
   // / hourly projects; a fixed-bid project may raise several (capped by its contract value).

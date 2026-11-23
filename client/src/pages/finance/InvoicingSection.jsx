@@ -14,6 +14,8 @@ import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import SearchableSelect from '../../components/ui/SearchableSelect.jsx';
 import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
+import { cancelledInvoiceColumns } from '../analytics/ClientInvoices.jsx';
 
 function money(n) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -122,9 +124,13 @@ export default function InvoicingSection() {
   const [loading, setLoading] = useState(true);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [computeOpen, setComputeOpen] = useState(false);
+  const [cancelled, setCancelled] = useState([]); // cancelled invoices (own tab)
+  const [view, setView] = useState('invoices'); // 'invoices' | 'cancelled'
+  const [cancelling, setCancelling] = useState(null); // the invoice whose cancel reason is being asked
 
   function load() {
     setLoading(true);
+    apiClient.get('/billing/invoices-cancelled').then(({ data }) => setCancelled(data.data || [])).catch(() => setCancelled([]));
     apiClient.get('/billing/invoices').then(({ data }) => setRows(data.data || [])).catch((err) => pushError(apiErrorMessage(err, 'Failed to load invoices'), 'Something went wrong')).finally(() => setLoading(false));
   }
   useEffect(load, []);
@@ -233,6 +239,7 @@ export default function InvoicingSection() {
         <div className="flex gap-2">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => downloadInvoice(row)}><Printer className="h-3.5 w-3.5" /> View / download</button>
           {row.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(row, 'sent')}>Mark sent (shared)</button>}
+          {!(row.payments_count > 0) && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setCancelling(row)}>Cancel invoice</button>}
           {row.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(row)}>{row.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
           {row.payments_count > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => setPaymentsFor(row)}>Payments</button>}
           {row.status === 'sent' && row.payment_status !== 'paid' && <button type="button" className="btn-ghost text-xs" data-testid="invoice-followup" onClick={() => setChaseFor(row)}>Follow-up{row.followup_count ? ` (${row.followup_count})` : ''}</button>}
@@ -270,7 +277,28 @@ export default function InvoicingSection() {
           ))}
         </div>
       )}
-      {!loading && rows.length === 0 ? (
+      <UndoReasonModal
+        open={Boolean(cancelling)}
+        title={`Cancel invoice ${cancelling?.invoice_number || ''}`}
+        description={cancelling ? `${cancelling.line_items?.project?.name || 'This invoice'} · ${cancelling.period_month}/${cancelling.period_year}. It leaves the invoice list and the totals, and is kept in the Cancelled tab with this reason. You can generate a new invoice for the same month afterwards.` : ''}
+        fieldLabel="Why is this invoice cancelled? (shown in the Cancelled tab)"
+        confirmLabel="Cancel invoice"
+        closeLabel="Keep invoice"
+        onClose={() => setCancelling(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/billing/invoices/${cancelling.id}/cancel`, { reason });
+          pushInfo(`Invoice ${cancelling.invoice_number || ''} cancelled`);
+          setCancelling(null);
+          load();
+        }}
+      />
+      <div className="flex gap-1" role="tablist" aria-label="Invoices or cancelled invoices">
+        <button type="button" role="tab" aria-selected={view === 'invoices'} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'invoices' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('invoices')}>Invoices ({rows.length})</button>
+        <button type="button" role="tab" aria-selected={view === 'cancelled'} data-testid="cancelled-tab" className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'cancelled' ? 'bg-danger-50 text-danger-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('cancelled')}>Cancelled ({cancelled.length})</button>
+      </div>
+      {view === 'cancelled' ? (
+        <DataTable columns={cancelledInvoiceColumns} rows={cancelled} loading={loading} emptyLabel="No cancelled invoices." />
+      ) : !loading && rows.length === 0 ? (
         <EmptyState title="No invoices yet" description="Compute revenue for a period, then generate an invoice for a project." />
       ) : (
         <DataTable columns={columns} rows={shown} loading={loading} emptyLabel={anyFilter ? 'No invoices match these filters.' : 'No invoices.'} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />

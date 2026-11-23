@@ -3,7 +3,7 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Modal from '../ui/Modal.jsx';
 
 /** Asks for the reason before something is undone (reimbursement, payment). onConfirm(reason) does the request; its error shows here. */
-export default function UndoReasonModal({ open, title, description, confirmLabel = 'Undo', fieldLabel = 'Reason (kept in the history)', minLength = 3, confirmClass = 'btn-danger', onConfirm, onClose }) {
+export default function UndoReasonModal({ open, title, description, confirmLabel = 'Undo', fieldLabel = 'Reason (kept in the history)', minLength = 3, confirmClass = 'btn-danger', closeLabel = 'Cancel', onConfirm, onClose }) {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -29,7 +29,7 @@ export default function UndoReasonModal({ open, title, description, confirmLabel
       layer="z-[60]"
       footer={(
         <>
-          <button type="button" className="btn-secondary" disabled={saving} onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-secondary" disabled={saving} onClick={onClose}>{closeLabel}</button>
           <button type="button" className={confirmClass} disabled={saving || reason.trim().length < minLength} onClick={submit}>{saving ? 'Working…' : confirmLabel}</button>
         </>
       )}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FileText, Printer } from 'lucide-react';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 import InvoicePaymentsModal from '../../components/payments/InvoicePaymentsModal.jsx';
+import UndoReasonModal from '../../components/payments/UndoReasonModal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -271,16 +272,33 @@ export function ClientInvoiceDrawer({ open, initial, onClose, onGenerated }) {
   );
 }
 
+/** Columns of the Cancelled invoices list: which invoice, the billing month and contract(s) it covered, and who cancelled it and why. */
+export const cancelledInvoiceColumns = [
+  { key: 'number', header: 'Invoice no.', render: (r) => <span className="font-mono text-xs font-semibold text-danger-700 line-through">{r.invoice_number || '—'}</span> },
+  { key: 'month', header: 'Billing month', render: (r) => <span className="font-medium text-tertiary-900">{periodLabel({ period_month: r.period_month, period_year: r.period_year })}</span> },
+  { key: 'client', header: 'Client', render: (r) => r.client_name || '—' },
+  { key: 'contracts', header: 'Contract(s) cancelled', render: (r) => <span>{(r.contracts || []).map((c) => <span key={c} className="block">{c}</span>)}{!(r.contracts || []).length && '—'}</span> },
+  { key: 'amount', header: 'Amount', render: (r) => <span className="tabular-nums">{amountText(r.amount, r.currency)}</span> },
+  { key: 'was', header: 'Was', render: (r) => <Badge value={r.status_when_cancelled} /> },
+  { key: 'by', header: 'Cancelled', render: (r) => <span className="text-xs text-tertiary-600">{r.cancelled_at ? dateText(String(r.cancelled_at).slice(0, 10)) : ''}{r.cancelled_by_name ? <span className="block">by {r.cancelled_by_name}</span> : null}</span> },
+  { key: 'reason', header: 'Reason', render: (r) => <span className="text-sm text-danger-700">{r.cancel_reason}</span> },
+];
+
 /** Generated client invoices for a month, with download and status steps. */
 export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
   const { user } = useAuth();
   const { pushError, pushInfo } = useAlerts();
   const [rows, setRows] = useState([]);
+  const [cancelled, setCancelled] = useState([]);
+  const [view, setView] = useState('invoices'); // 'invoices' | 'cancelled'
+  const [cancelling, setCancelling] = useState(null); // the invoice whose cancel reason is being asked
   const [loading, setLoading] = useState(true);
 
   function load() {
     setLoading(true);
-    apiClient.get('/billing/invoices', { params: { period_month: period.period_month, period_year: period.period_year } })
+    const params = { period_month: period.period_month, period_year: period.period_year };
+    apiClient.get('/billing/invoices-cancelled', { params }).then(({ data }) => setCancelled(data.data || [])).catch(() => setCancelled([]));
+    apiClient.get('/billing/invoices', { params })
       .then(({ data }) => setRows(data.data || []))
       .catch((err) => pushError(apiErrorMessage(err, 'Failed to load invoices'), 'Something went wrong'))
       .finally(() => setLoading(false));
@@ -352,6 +370,7 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
         <div className="flex flex-wrap gap-1">
           <button type="button" className="btn-ghost inline-flex items-center gap-1 text-xs" onClick={() => printInvoice(r)}><Printer className="h-3.5 w-3.5" /> Download</button>
           {onEdit && <button type="button" className="btn-ghost text-xs" onClick={() => onEdit(r)}>Edit</button>}
+          {!(r.payments_count > 0) && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => setCancelling(r)}>Cancel invoice</button>}
           <button type="button" className="btn-ghost text-xs text-danger-600" onClick={() => remove(r)}>Delete</button>
           {r.status === 'draft' && <button type="button" className="btn-ghost text-xs" onClick={() => transition(r, 'sent')}>Mark sent</button>}
           {r.status === 'sent' && <button type="button" className="btn-ghost text-xs" onClick={() => recordPayment(r)}>{r.payment_status === 'partly_paid' ? 'Record payment' : 'Mark paid'}</button>}
@@ -376,7 +395,28 @@ export function ClientInvoicesTable({ period, refreshKey = 0, onEdit }) {
     <>
       {paymentDialog.dialog}
       <InvoicePaymentsModal invoice={paymentsFor} canUndo={Boolean(user?.is_group_superadmin)} onClose={() => setPaymentsFor(null)} onChanged={load} />
-      <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />
+      <UndoReasonModal
+        open={Boolean(cancelling)}
+        title={`Cancel invoice ${cancelling?.invoice_number || ''}`}
+        description={cancelling ? `${cancelling.project?.name || 'This invoice'} · ${periodLabel(period)}. It leaves the invoice list and the totals, and is kept in the Cancelled tab with this reason. You can generate a new invoice for the same month afterwards.` : ''}
+        fieldLabel="Why is this invoice cancelled? (shown in the Cancelled tab)"
+        confirmLabel="Cancel invoice"
+        closeLabel="Keep invoice"
+        onClose={() => setCancelling(null)}
+        onConfirm={async (reason) => {
+          await apiClient.post(`/billing/invoices/${cancelling.id}/cancel`, { reason });
+          pushInfo(`Invoice ${cancelling.invoice_number || ''} cancelled`);
+          setCancelling(null);
+          load();
+        }}
+      />
+      <div className="mb-2 flex gap-1" role="tablist" aria-label="Invoices or cancelled invoices">
+        <button type="button" role="tab" aria-selected={view === 'invoices'} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'invoices' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('invoices')}>Invoices ({rows.length})</button>
+        <button type="button" role="tab" aria-selected={view === 'cancelled'} data-testid="cancelled-tab" className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'cancelled' ? 'bg-danger-50 text-danger-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('cancelled')}>Cancelled ({cancelled.length})</button>
+      </div>
+      {view === 'cancelled'
+        ? <DataTable columns={cancelledInvoiceColumns} rows={cancelled} loading={loading} emptyLabel={`No cancelled invoices for ${periodLabel(period)}`} />
+        : <DataTable columns={columns} rows={rows} loading={loading} emptyLabel={`No invoices generated for ${periodLabel(period)} yet`} selectable selectedIds={selected} onSelectionChange={setSelected} actions={[{ key: 'pdf', label: `Download ${selected.length} as one PDF`, onClick: downloadSelected }]} />}
     </>
   );
 }

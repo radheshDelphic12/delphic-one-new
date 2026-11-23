@@ -194,7 +194,7 @@ async function restore(entityType, entityId, reason, user) {
     }
     await tx[model].update({
       where: { id: entityId },
-      data: { deleted_at: null, deleted_by: null, delete_reason: null, ...keyFix },
+      data: { deleted_at: null, deleted_by: null, delete_reason: null, ...keyFix, ...(entityType === 'invoice' ? { cancelled_at: null, cancelled_by: null, cancel_reason: null, cancelled_number: null } : {}) },
     });
     await tx.auditLog.create({
       data: {

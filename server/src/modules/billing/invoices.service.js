@@ -513,6 +513,64 @@ async function deleteClientInvoice(orgId, user, invoiceId, { reason } = {}) {
   return { deleted: true };
 }
 
+// Cancel an invoice (admin): it drops out of the invoice list and every total, the same month and contracts can be invoiced again, and it is
+// kept in the Cancelled list (which invoice, which month and contracts, who cancelled it and why). A reason is always required. An invoice
+// with payments is not cancelled until its payments are undone. Restorable from Group Dashboard > Logs like any deleted invoice.
+async function cancelClientInvoice(orgId, user, invoiceId, { reason } = {}) {
+  const why = (reason || '').trim();
+  if (why.length < 3) return { error: 'cancel_reason_required' };
+  const invoice = await prisma.clientInvoice.findFirst({ where: { id: invoiceId, org_id: orgId } });
+  if (!invoice) return { error: 'not_found' };
+  const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
+  if (frozen) return frozen;
+  const account = await prisma.account.findFirst({ where: { id: invoice.client_account_id }, select: { service_category: true } });
+  if (fixedBid.isFixedBid(account) && (await fixedBid.monthLocked(orgId, invoice.client_account_id, { period_month: invoice.period_month, period_year: invoice.period_year }))) return { error: 'billing_locked' };
+  const paid = await prisma.paymentRecord.count({ where: { org_id: orgId, kind: 'client_invoice', reference_id: invoice.id, deleted_at: null } });
+  if (paid > 0) return { error: 'cancel_has_payments' };
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await require('../cashPosition/cash.hooks').unlink(tx, user.id, 'invoice', invoice.id);
+    await tx.clientInvoice.update({
+      where: { id: invoice.id },
+      data: {
+        deleted_at: now, deleted_by: user.id, delete_reason: `Cancelled: ${why}`,
+        cancelled_at: now, cancelled_by: user.id, cancel_reason: why, cancelled_number: invoice.invoice_number,
+        // the number is released so the replacement invoice can be numbered (the original stays in cancelled_number)
+        ...(invoice.invoice_number ? { invoice_number: `${invoice.invoice_number}~deleted~${String(invoice.id).slice(0, 8)}` } : {}),
+      },
+    });
+  });
+  await prisma.auditLog.create({
+    data: {
+      org_id: orgId, actor_id: user.id, action: 'client_invoice_cancel', entity_type: 'client_invoice', entity_id: invoice.id, reason: why,
+      snapshot: { status: invoice.status, invoice_number: invoice.invoice_number, amount: Number(invoice.amount), currency: invoice.currency, client_account_id: invoice.client_account_id, period_month: invoice.period_month, period_year: invoice.period_year, line_items: invoice.line_items },
+    },
+  });
+  return { cancelled: true };
+}
+
+// The cancelled invoices (optionally of one billing month): which invoice, the month, the contract(s) it covered, and who cancelled it and why.
+async function listCancelledInvoices(orgId, { period_month, period_year } = {}) {
+  const rows = await prisma.clientInvoice.findMany({
+    where: { org_id: orgId, deleted_at: { not: null }, cancelled_at: { not: null }, ...(period_month ? { period_month } : {}), ...(period_year ? { period_year } : {}) },
+    orderBy: [{ cancelled_at: 'desc' }],
+    include: { client_account: CLIENT_INVOICE_ACCOUNT },
+  });
+  const userIds = [...new Set(rows.map((r) => r.cancelled_by).filter(Boolean))];
+  const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
+  const byId = new Map(users.map((u) => [u.id, u.name]));
+  return rows.map((r) => {
+    const s = serializeClientInvoice(r);
+    const items = r.line_items && !Array.isArray(r.line_items) ? r.line_items : {};
+    const contracts = items.consolidated ? (items.items || []).map((i) => i.project?.name).filter(Boolean) : [s.project?.name].filter(Boolean);
+    return {
+      id: r.id, invoice_number: r.cancelled_number || null, period_month: r.period_month, period_year: r.period_year,
+      client_name: s.project?.client_name || null, contracts, amount: s.total_amount, currency: r.currency, status_when_cancelled: r.status,
+      invoice_date: s.invoice_date, cancelled_at: r.cancelled_at, cancelled_by_name: byId.get(r.cancelled_by) || null, cancel_reason: r.cancel_reason,
+    };
+  });
+}
+
 async function listClientInvoices(orgId, { client_account_id, status, period_month, period_year } = {}) {
   // A combined invoice is stored on one contract but covers several: filtering by a contract also finds the combined invoices that include it.
   const own = client_account_id ? { OR: [{ client_account_id }, { line_items: { path: ['consolidated'], equals: true } }] } : {};
@@ -727,6 +785,8 @@ module.exports = {
   generateConsolidatedInvoice,
   updateClientInvoice,
   deleteClientInvoice,
+  cancelClientInvoice,
+  listCancelledInvoices,
   listClientInvoices,
   getClientInvoice,
   serializeClientInvoice,

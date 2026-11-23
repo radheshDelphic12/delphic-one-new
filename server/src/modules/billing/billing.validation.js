@@ -114,6 +114,8 @@ const consolidatedInvoiceSchema = z.object({
 
 // Deleting an invoice: a reason is required once it has been sent / paid.
 const deleteInvoiceSchema = z.object({ reason: z.string().trim().max(500).optional() });
+const cancelInvoiceSchema = z.object({ reason: z.string().trim().min(3).max(1000) });
+const cancelledListQuerySchema = z.object({ period_month: z.coerce.number().int().min(1).max(12).optional(), period_year: z.coerce.number().int().min(2000).max(2100).optional() });
 
 const updateInvoiceSchema = z.object({
   invoice_number: INVOICE_NUMBER,
@@ -448,6 +450,8 @@ module.exports = {
   computeDailyRevenueSchema,
   listDailyRevenueQuerySchema,
   deleteInvoiceSchema,
+  cancelInvoiceSchema,
+  cancelledListQuerySchema,
   contractChargeSchema,
   updateContractChargeSchema,
   billingAdjustmentSchema,
