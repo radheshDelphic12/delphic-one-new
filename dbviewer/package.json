@@ -4,10 +4,10 @@
   "private": true,
   "description": "Read-only viewer for database dump files (super admin only). Separate from the app: shares no code with server/ or client/.",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node init && node server/index.js",
     "test": "jest --runInBand",
-    "build:web": "vite build web",
-    "dev:web": "vite web"
+    "build:web": "node init && vite build web",
+    "dev:web": "node init && vite web"
   },
   "dependencies": {
     "exceljs": "4.4.0",
@@ -23,6 +23,8 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["<rootDir>/test/**/*.test.js"]
+    "testMatch": [
+      "<rootDir>/test/**/*.test.js"
+    ]
   }
 }

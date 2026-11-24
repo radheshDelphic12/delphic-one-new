@@ -7,6 +7,7 @@
 // so "did the client pay us, and did we pay the vendor" is one look. The due dates are the ones set on the invoices (Invoicing, Vendor Invoices).
 
 const { z } = require('zod');
+const prisma = require('../../config/db');
 const invoices = require('./invoices.service');
 
 // Lazy: live.service loads the calculation engines, which load the billing code.
@@ -61,11 +62,31 @@ function vendorSide(inv) {
   };
 }
 
+/**
+ * A resource counts as paid when the vendor's payment for the month is paid, or when it was marked paid on its own here.
+ * `vendor_resource` says which, and when.
+ */
+function withResourcePayment(row, markOf) {
+  const mark = markOf.get(row.key);
+  const viaVendorPayment = row.vendor_invoice.state === 'paid';
+  return {
+    ...row,
+    vendor_paid: viaVendorPayment || Boolean(mark),
+    vendor_resource: {
+      paid: viaVendorPayment || Boolean(mark),
+      source: viaVendorPayment ? 'vendor_payment' : mark ? 'marked' : null,
+      paid_on: mark ? mark.paid_on.toISOString().slice(0, 10) : null,
+      amount: mark?.amount == null ? null : n(mark.amount),
+      note: mark?.note || null,
+    },
+  };
+}
+
 const matchStatus = (status, r) => {
   if (!status || status === 'all') return true;
   if (status === 'client_pending') return r.client.state !== 'paid';
-  if (status === 'vendor_pending') return r.vendor_invoice.state !== 'paid';
-  if (status === 'client_paid_vendor_pending') return r.client.state === 'paid' && r.vendor_invoice.state !== 'paid';
+  if (status === 'vendor_pending') return !r.vendor_paid;
+  if (status === 'client_paid_vendor_pending') return r.client.state === 'paid' && !r.vendor_paid;
   if (status === 'overdue') return Boolean(r.client.overdue || r.vendor_invoice.overdue);
   return true;
 };
@@ -98,20 +119,24 @@ function summarize(rows) {
       overdue: count(vendors, (v) => v.overdue),
     },
     // the one to watch: the client has paid, the vendor is still waiting
-    client_paid_vendor_pending: rows.filter((r) => r.client.state === 'paid' && r.vendor_invoice.state !== 'paid').length,
+    client_paid_vendor_pending: rows.filter((r) => r.client.state === 'paid' && !r.vendor_paid).length,
     // the other one: we paid the vendor but the client has not paid us
-    vendor_paid_client_pending: rows.filter((r) => r.vendor_invoice.state === 'paid' && r.client.state !== 'paid').length,
+    vendor_paid_client_pending: rows.filter((r) => r.vendor_paid && r.client.state !== 'paid').length,
+    // each resource on its own: paid through the vendor's payment, or marked paid here
+    resources_paid: rows.filter((r) => r.vendor_paid).length,
   };
 }
 
 async function paymentTracker(orgId, query) {
   const { period_month, period_year, client_name, vendor_account_id, status } = query;
   const period = { period_month, period_year };
-  const [vendorLive, clientInvoices, vendorInvoices] = await Promise.all([
+  const [vendorLive, clientInvoices, vendorInvoices, marks] = await Promise.all([
     live().vendorPaymentsLive(orgId, { ...period, vendor_account_id }),
     invoices.listClientInvoices(orgId, period),
     invoices.listVendorInvoices(orgId, { ...period, ...(vendor_account_id ? { vendor_account_id } : {}) }),
+    prisma.vendorResourcePayment.findMany({ where: { org_id: orgId, ...period } }),
   ]);
+  const markOf = new Map(marks.map((m) => [`${m.org_membership_id}|${m.project_id}`, m]));
 
   const clientInvoiceOf = (projectId) => clientInvoices.find((i) => i.client_account_id === projectId)
     || clientInvoices.find((i) => i.line_items?.consolidated && (i.line_items.items || []).some((x) => x.account_id === projectId))
@@ -120,8 +145,9 @@ async function paymentTracker(orgId, query) {
 
   const all = (vendorLive.lines || [])
     .filter((l) => l.vendor?.id && l.project?.id)
-    .map((l) => ({
+    .map((l) => withResourcePayment({
       key: `${l.org_membership_id}|${l.project.id}`,
+      org_membership_id: l.org_membership_id,
       client_name: l.project.client_name || null,
       project: { id: l.project.id, name: l.project.name, code: l.project.code || null },
       resource: l.contractor,
@@ -131,7 +157,7 @@ async function paymentTracker(orgId, query) {
       currency: l.currency,
       client: clientSide(clientInvoiceOf(l.project.id)),
       vendor_invoice: vendorSide(vendorInvoiceOf(l.project.id, l.vendor.id)),
-    }))
+    }, markOf))
     // a contractor with nothing to bill that month (no approved hours, no invoice on either side) is not a payment to track
     .filter((r) => r.vendor_amount > 0 || r.client.state !== 'no_invoice' || r.vendor_invoice.state !== 'no_invoice')
     .sort((a, b) => String(a.client_name).localeCompare(String(b.client_name)) || String(a.project.name).localeCompare(String(b.project.name)) || String(a.resource).localeCompare(String(b.resource)));
@@ -146,4 +172,41 @@ async function paymentTracker(orgId, query) {
   return { ...period, rows, summary: summarize(scoped), clients, vendors };
 }
 
-module.exports = { querySchema, paymentTracker, STATUS };
+const markSchema = z.object({
+  org_membership_id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  period_month: z.coerce.number().int().min(1).max(12),
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-12-31').optional(),
+  amount: z.coerce.number().min(0).max(1e10).optional(),
+  note: z.string().trim().max(300).optional(),
+});
+const unmarkSchema = markSchema.pick({ org_membership_id: true, project_id: true, period_month: true, period_year: true });
+
+/** The vendor a contractor belongs to, and proof that the person is a contractor of this company. */
+async function contractorOf(orgId, membershipId) {
+  return prisma.orgMembership.findFirst({ where: { id: membershipId, org_id: orgId, worker_type: 'contractor', vendor_account_id: { not: null } }, select: { id: true, vendor_account_id: true } });
+}
+
+/** Mark one resource paid for a month (or change the date / note of an earlier mark). */
+async function markResourcePaid(orgId, user, input) {
+  const member = await contractorOf(orgId, input.org_membership_id);
+  if (!member) return { error: 'not_a_vendor_resource' };
+  const project = await prisma.account.findFirst({ where: { id: input.project_id, org_id: orgId }, select: { id: true } });
+  if (!project) return { error: 'project_not_found' };
+  const key = { org_membership_id: input.org_membership_id, project_id: input.project_id, period_month: input.period_month, period_year: input.period_year };
+  const data = { paid_on: new Date(`${input.paid_on || new Date().toISOString().slice(0, 10)}T00:00:00Z`), amount: input.amount ?? null, note: input.note || null, marked_by: user.id };
+  const row = await prisma.vendorResourcePayment.upsert({
+    where: { org_membership_id_project_id_period_month_period_year: key },
+    create: { ...key, ...data, org_id: orgId, vendor_account_id: member.vendor_account_id },
+    update: data,
+  });
+  return { payment: { paid_on: row.paid_on.toISOString().slice(0, 10), amount: row.amount == null ? null : n(row.amount), note: row.note } };
+}
+
+async function unmarkResourcePaid(orgId, input) {
+  const done = await prisma.vendorResourcePayment.deleteMany({ where: { org_id: orgId, ...input } });
+  return done.count ? { ok: true } : { error: 'not_marked' };
+}
+
+module.exports = { querySchema, paymentTracker, STATUS, markSchema, unmarkSchema, markResourcePaid, unmarkResourcePaid };

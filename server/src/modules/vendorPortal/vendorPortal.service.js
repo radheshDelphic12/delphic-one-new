@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
+const { enqueue } = require('../../lib/email/outbox');
 
 // Vendor portal (docs/features/VENDOR-PORTAL.md). A vendor's people sign in on their own page with their own login (never a company user):
 //  - they see only the requirements the team shared with their company (no client name, no budget);
@@ -38,6 +39,40 @@ async function login(input) {
   await prisma.vendorPortalUser.update({ where: { id: user.id }, data: { last_login_at: new Date() } });
   const token = jwt.sign({ vpu: user.id, kind: 'vendor-portal' }, secret(), { expiresIn: '12h' });
   return { token, user: shape(user, account) };
+}
+
+// ---- forgot password: an emailed link, valid for an hour; only the hash of the token is stored; the answer never says whether the email exists
+const forgotSchema = z.object({ email: z.string().trim().toLowerCase().email() });
+const resetSchema = z.object({ token: z.string().min(20).max(200), password: z.string().min(8, 'Use at least 8 characters').max(100) });
+const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+const RESET_MINUTES = 60;
+
+async function forgotPassword(email) {
+  const user = await prisma.vendorPortalUser.findUnique({ where: { email } });
+  if (!user || !user.active) return { ok: true };
+  // one request a minute per login (the link of the last one stays valid)
+  if (user.reset_expires_at && user.reset_expires_at.getTime() - Date.now() > (RESET_MINUTES - 1) * 60000) return { ok: true };
+  const token = crypto.randomBytes(32).toString('hex');
+  await prisma.vendorPortalUser.update({ where: { id: user.id }, data: { reset_token_hash: hashToken(token), reset_expires_at: new Date(Date.now() + RESET_MINUTES * 60000) } });
+  const link = `${env.corsOrigin.replace(/\/$/, '')}/vendor-portal?reset=${token}`;
+  await enqueue(prisma, {
+    orgId: user.org_id, kind: 'vendor_portal_password_reset', to: { email: user.email, name: user.name },
+    subject: 'Reset your vendor portal password',
+    text: `Hi ${user.name},
+
+Use this link to choose a new password for the vendor portal. It works for ${RESET_MINUTES} minutes:
+${link}
+
+If you did not ask for this, ignore this email; your password stays as it is.`,
+  });
+  return { ok: true };
+}
+
+async function resetPassword({ token, password }) {
+  const user = await prisma.vendorPortalUser.findFirst({ where: { reset_token_hash: hashToken(token), reset_expires_at: { gt: new Date() }, active: true } });
+  if (!user) return { error: 'bad_reset_link' };
+  await prisma.vendorPortalUser.update({ where: { id: user.id }, data: { password_hash: await bcrypt.hash(password, 10), reset_token_hash: null, reset_expires_at: null } });
+  return { ok: true };
 }
 
 const shape = (u, account) => ({ id: u.id, name: u.name, email: u.email, vendor: account ? { id: account.id, name: account.name } : null });
@@ -127,7 +162,33 @@ async function createSubmission(u, input, file) {
   const row = await prisma.vendorSubmission.create({
     data: { ...rest, org_id: u.org_id, requirement_id, vendor_account_id: u.vendor_account_id, portal_user_id: u.id, cv_file_path: stored, cv_file_name: file ? String(file.originalname).slice(0, 200) : null },
   });
+  await notifyContact(u, row, input.requirement_id);
   return { submission: subShape(row) };
+}
+
+/** Tell the vendor's point of contact (the owner of the vendor account; the admins when it has none) that a candidate is waiting. Never fails the submission. */
+async function notifyContact(u, row, requirementId) {
+  try {
+    const account = await prisma.account.findUnique({ where: { id: u.vendor_account_id }, select: { owner_id: true, name: true } });
+    let userIds = account?.owner_id ? [account.owner_id] : [];
+    if (!userIds.length) userIds = (await prisma.orgMembership.findMany({ where: { org_id: u.org_id, role: 'admin', deleted_at: null }, select: { person_id: true } })).map((m) => m.person_id);
+    userIds = [...new Set(userIds)];
+    if (!userIds.length) return;
+    const muted = await prisma.notificationPreference.findMany({ where: { user_id: { in: userIds }, type: 'vendor_candidate_submitted', in_app: false }, select: { user_id: true } });
+    const off = new Set(muted.map((m) => m.user_id));
+    const to = userIds.filter((id) => !off.has(id));
+    if (!to.length) return;
+    const req = await prisma.requirement.findUnique({ where: { id: requirementId }, select: { title: true } });
+    await prisma.notification.createMany({
+      data: to.map((user_id) => ({
+        user_id, type: 'vendor_candidate_submitted', title: 'Candidate from a vendor', org_id: u.org_id,
+        body: `${account?.name || 'A vendor'} put ${row.candidate_name} forward for "${req?.title || 'a requirement'}". Review it under Submissions.`,
+        entity_type: 'vendor_submission', entity_id: row.id, metadata: { vendor_account_id: u.vendor_account_id },
+      })),
+    });
+  } catch (err) {
+    require('../../config/logger').warn('vendor_candidate_notify_failed', { err: err.message });
+  }
 }
 
 async function portalSubmissions(u) {
@@ -386,7 +447,7 @@ async function adminInvoiceFile(orgId, id) {
 }
 
 module.exports = {
-  loginSchema, login, userFromToken, me, portalRequirements, submissionSchema, createSubmission, portalSubmissions, withdrawSubmission,
+  forgotSchema, forgotPassword, resetSchema, resetPassword, loginSchema, login, userFromToken, me, portalRequirements, submissionSchema, createSubmission, portalSubmissions, withdrawSubmission,
   portalResources, invoiceSchema, createInvoice, portalInvoices, portalInvoiceFile,
   userSchema, userPatchSchema, vendorOverview, addUser, updateUser, requirementShares, setRequirementShares,
   adminSubmissions, pendingCount, submissionOwner, decisionSchema, approve, reject, submissionCv,

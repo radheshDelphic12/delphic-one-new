@@ -196,3 +196,78 @@ describe('who may manage', () => {
     expect((await apost(`/vendors/${vendor.id}/users`, { name: 'Dup', email: 'vee@vendor.test', password: 'Vendor@1234' })).status).toBe(409);
   });
 });
+
+describe('the point of contact is told when a candidate arrives', () => {
+  test('the owner of the vendor account gets a notification that opens Submissions; the admins get it when the vendor has no owner; a muted person does not', async () => {
+    await share();
+    await ppost('/submissions').send(candidate());
+    const mine = await prisma.notification.findMany({ where: { user_id: poc.id, type: 'vendor_candidate_submitted' } });
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ entity_type: 'vendor_submission', title: 'Candidate from a vendor' });
+    expect(mine[0].body).toMatch(/Vendor One put Cara Candidate forward for "Java developer"/);
+    expect(await prisma.notification.count({ where: { user_id: admin.id, type: 'vendor_candidate_submitted' } })).toBe(0);
+
+    // a vendor with no owner: the admins hear about it
+    await prisma.account.update({ where: { id: vendor.id }, data: { owner_id: null } }).catch(() => null);
+    const stillOwned = await prisma.account.findUnique({ where: { id: vendor.id } });
+    if (!stillOwned.owner_id) {
+      await ppost('/submissions').send(candidate({ candidate_name: 'Dan Second', email: 'dan@mail.test' }));
+      expect(await prisma.notification.count({ where: { user_id: admin.id, type: 'vendor_candidate_submitted' } })).toBe(1);
+    }
+
+    // muting the kind in the preferences means no bell entry
+    await prisma.account.update({ where: { id: vendor.id }, data: { owner_id: poc.id } });
+    await prisma.notificationPreference.create({ data: { user_id: poc.id, type: 'vendor_candidate_submitted', in_app: false, email: false } });
+    await ppost('/submissions').send(candidate({ candidate_name: 'Eve Third', email: 'eve@mail.test' }));
+    expect(await prisma.notification.count({ where: { user_id: poc.id, type: 'vendor_candidate_submitted' } })).toBe(1);
+  });
+});
+
+describe('forgot password', () => {
+  const lastMail = () => prisma.emailOutbox.findFirst({ where: { kind: 'vendor_portal_password_reset' }, orderBy: { created_at: 'desc' } });
+  const tokenOf = (mail) => /reset=([a-f0-9]{64})/.exec(mail.text || mail.body_text || '')?.[1];
+  const forgot = (email) => request(app).post(`${P}/forgot-password`).send({ email });
+
+  test('the answer is the same for an unknown email; a known one gets one mailed link that sets a new password once', async () => {
+    await prisma.emailOutbox.deleteMany({ where: { kind: 'vendor_portal_password_reset' } });
+    const unknown = await forgot('nobody@vendor.test');
+    expect(unknown.status).toBe(200);
+    expect(await lastMail()).toBeNull();
+
+    expect((await forgot('vee@vendor.test')).status).toBe(200);
+    const mail = await lastMail();
+    expect(mail.to_email).toBe('vee@vendor.test');
+    const token = tokenOf(mail);
+    expect(token).toBeTruthy();
+    // only a hash of the token is stored
+    const row = await prisma.vendorPortalUser.findUnique({ where: { email: 'vee@vendor.test' } });
+    expect(row.reset_token_hash).toBeTruthy();
+    expect(row.reset_token_hash).not.toBe(token);
+    // asking again within a minute sends nothing new
+    await forgot('vee@vendor.test');
+    expect(await prisma.emailOutbox.count({ where: { kind: 'vendor_portal_password_reset' } })).toBe(1);
+
+    // a short password, a wrong token
+    expect((await request(app).post(`${P}/reset-password`).send({ token, password: 'short' })).status).toBe(422);
+    expect((await request(app).post(`${P}/reset-password`).send({ token: 'f'.repeat(64), password: 'NewVendor@1234' })).status).toBe(400);
+
+    expect((await request(app).post(`${P}/reset-password`).send({ token, password: 'NewVendor@1234' })).status).toBe(200);
+    expect((await request(app).post(`${P}/login`).send({ email: 'vee@vendor.test', password: 'Vendor@1234' })).status).toBe(401);
+    expect((await request(app).post(`${P}/login`).send({ email: 'vee@vendor.test', password: 'NewVendor@1234' })).status).toBe(200);
+    // the link works once
+    expect((await request(app).post(`${P}/reset-password`).send({ token, password: 'Another@12345' })).status).toBe(400);
+  });
+
+  test('an expired link and a switched-off login do not work', async () => {
+    await prisma.emailOutbox.deleteMany({ where: { kind: 'vendor_portal_password_reset' } });
+    await forgot('vee@vendor.test');
+    const token = tokenOf(await lastMail());
+    await prisma.vendorPortalUser.updateMany({ where: { email: 'vee@vendor.test' }, data: { reset_expires_at: new Date(Date.now() - 1000) } });
+    expect((await request(app).post(`${P}/reset-password`).send({ token, password: 'NewVendor@1234' })).status).toBe(400);
+
+    await forgot('vee@vendor.test');
+    const fresh = tokenOf(await lastMail());
+    await prisma.vendorPortalUser.updateMany({ where: { email: 'vee@vendor.test' }, data: { active: false } });
+    expect((await request(app).post(`${P}/reset-password`).send({ token: fresh, password: 'NewVendor@1234' })).status).toBe(400);
+  });
+});

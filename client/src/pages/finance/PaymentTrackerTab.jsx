@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, Hourglass } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
+import { promptAction } from '../../lib/confirmAction.js';
 import DataTable from '../../components/ui/DataTable.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 
@@ -43,7 +44,7 @@ function DueDate({ side }) {
  * invoice side by side: invoice, received / paid, due date. Employees are not here (their pay runs through payroll).
  */
 export default function PaymentTrackerTab() {
-  const { pushError } = useAlerts();
+  const { pushError, pushSuccess } = useAlerts();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -51,6 +52,7 @@ export default function PaymentTrackerTab() {
   const [vendor, setVendor] = useState('');
   const [show, setShow] = useState('all');
   const [data, setData] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,9 +61,29 @@ export default function PaymentTrackerTab() {
       .then(({ data: res }) => { if (!cancelled) setData(res.data); })
       .catch((err) => { if (!cancelled) { setData({ rows: [], summary: null, clients: [], vendors: [] }); pushError(apiErrorMessage(err, 'Could not load the payment tracker'), 'Something went wrong'); } });
     return () => { cancelled = true; };
-  }, [month, year, client, vendor, show]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [month, year, client, vendor, show, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const columns = useMemo(() => [
+  const resourceKey = (row) => ({ org_membership_id: row.org_membership_id, project_id: row.project.id, period_month: month, period_year: year });
+  async function markPaid(row) {
+    const today = new Date().toISOString().slice(0, 10);
+    const paidOn = await promptAction(`${row.resource}: paid to ${row.vendor.name} on (date):`, today);
+    if (!paidOn) return;
+    const note = (await promptAction('Note, for example the transaction reference (optional):', '')) ?? '';
+    try {
+      await apiClient.put('/billing/payment-tracker/resource-payment', { ...resourceKey(row), paid_on: paidOn, ...(note.trim() ? { note: note.trim() } : {}) });
+      pushSuccess(`${row.resource} marked paid`);
+      setReloadKey((k) => k + 1);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not mark it paid'), 'Not saved'); }
+  }
+  async function unmark(row) {
+    try {
+      await apiClient.delete('/billing/payment-tracker/resource-payment', { params: resourceKey(row) });
+      pushSuccess('Mark removed');
+      setReloadKey((k) => k + 1);
+    } catch (err) { pushError(apiErrorMessage(err, 'Could not remove the mark'), 'Not saved'); }
+  }
+
+  const columns = [
     { key: 'resource', header: 'Resource', render: (r) => <span><span className="font-medium text-tertiary-900">{r.resource}</span><span className="block text-xs text-tertiary-500">{r.approved_hours}h approved</span></span> },
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor.name },
     { key: 'project', header: 'Client / project', render: (r) => <span>{r.client_name || '—'}<span className="block text-xs text-tertiary-500">{r.project.name}{r.project.code ? ` · ${r.project.code}` : ''}</span></span> },
@@ -71,7 +93,22 @@ export default function PaymentTrackerTab() {
     { key: 'v_invoice', header: 'Vendor · Invoice', render: (r) => (r.vendor_invoice.state === 'no_invoice' ? <span className="text-tertiary-500 text-xs">{money(r.vendor_amount, r.currency)} to bill</span> : <span className="tabular-nums"><span className="font-mono text-xs">{r.vendor_invoice.invoice_number || '—'}</span><span className="block text-xs text-tertiary-600">{money(r.vendor_invoice.payable, r.vendor_invoice.currency)}</span></span>) },
     { key: 'v_status', header: 'Vendor · Payment', render: (r) => { const [tone, label] = VENDOR_STATE[r.vendor_invoice.state]; return <Pill tone={tone}>{label}</Pill>; } },
     { key: 'v_due', header: 'Vendor · Due date', render: (r) => <DueDate side={r.vendor_invoice} /> },
-  ], []);
+    {
+      key: 'v_resource',
+      header: 'This resource paid',
+      render: (r) => (
+        <span className="flex flex-col items-start gap-1" data-testid="resource-paid-cell">
+          {r.vendor_resource.paid
+            ? <Pill tone="green">{r.vendor_resource.source === 'vendor_payment' ? 'Paid (vendor payment)' : `Paid ${r.vendor_resource.paid_on || ''}`.trim()}</Pill>
+            : <Pill tone="red">Not paid</Pill>}
+          {r.vendor_resource.note && <span className="max-w-[12rem] text-[11px] text-tertiary-500">{r.vendor_resource.note}</span>}
+          {r.vendor_resource.source === 'marked'
+            ? <button type="button" className="btn-ghost text-xs" onClick={() => unmark(r)} data-testid="resource-unmark">Undo</button>
+            : !r.vendor_resource.paid && <button type="button" className="btn-ghost text-xs" onClick={() => markPaid(r)} data-testid="resource-mark-paid">Mark paid</button>}
+        </span>
+      ),
+    },
+  ];
 
   const s = data?.summary;
   return (

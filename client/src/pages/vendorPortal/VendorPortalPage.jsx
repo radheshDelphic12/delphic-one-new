@@ -25,10 +25,39 @@ const btnCls = 'inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-3.5 p
 const Field = ({ label, children, hint }) => (<label className="block text-sm font-medium text-slate-700">{label}{children}{hint && <span className="mt-1 block text-xs font-normal text-slate-500">{hint}</span>}</label>);
 
 function Login({ onDone }) {
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const resetToken = new URLSearchParams(window.location.search).get('reset') || '';
+  const [mode, setMode] = useState(resetToken ? 'reset' : 'login'); // login | forgot | reset
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false);
+  async function forgot(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try { await api('').post('/forgot-password', { email }); setNotice('If that email has a vendor portal login, we have sent a link to choose a new password. It works for one hour.'); } catch (err) { setError(errText(err)); } finally { setBusy(false); }
+  }
+  async function reset(e) {
+    e.preventDefault(); setBusy(true); setError('');
+    try { await api('').post('/reset-password', { token: resetToken, password }); window.history.replaceState({}, '', '/vendor-portal'); setPassword(''); setMode('login'); setNotice('Your password is changed. Sign in with the new one.'); } catch (err) { setError(errText(err)); } finally { setBusy(false); }
+  }
   async function submit(e) {
     e.preventDefault(); setBusy(true); setError('');
     try { const { data } = await api('').post('/login', { email, password }); saveToken(data.data.token); onDone(data.data.token); } catch (err) { setError(errText(err)); } finally { setBusy(false); }
+  }
+  if (mode !== 'login') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <form onSubmit={mode === 'reset' ? reset : forgot} className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" data-testid={mode === 'reset' ? 'vendor-reset' : 'vendor-forgot'}>
+          <h1 className="text-xl font-semibold text-slate-900">{mode === 'reset' ? 'Choose a new password' : 'Forgot your password?'}</h1>
+          <p className="mt-1 text-sm text-slate-500">{mode === 'reset' ? 'Use at least 8 characters.' : 'Enter your email and we will send you a link to choose a new one.'}</p>
+          <div className="mt-5 space-y-3">
+            {mode === 'reset'
+              ? <Field label="New password"><input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" /></Field>
+              : <Field label="Email"><input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" /></Field>}
+          </div>
+          {error && <p className="mt-3 text-sm text-rose-700" role="alert">{error}</p>}
+          {notice && <p className="mt-3 text-sm text-emerald-700" role="status">{notice}</p>}
+          <button className={`${btnCls} mt-5 w-full justify-center`} disabled={busy} type="submit">{busy ? 'Please wait...' : mode === 'reset' ? 'Save new password' : 'Send the link'}</button>
+          <button type="button" className="mt-3 w-full text-center text-sm text-slate-600 underline" onClick={() => { setMode('login'); setError(''); setNotice(''); }}>Back to sign in</button>
+        </form>
+      </div>
+    );
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -40,7 +69,9 @@ function Login({ onDone }) {
           <Field label="Password"><input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" /></Field>
         </div>
         {error && <p className="mt-3 text-sm text-rose-700" role="alert">{error}</p>}
+        {notice && <p className="mt-3 text-sm text-emerald-700" role="status">{notice}</p>}
         <button className={`${btnCls} mt-5 w-full justify-center`} disabled={busy} type="submit">{busy ? 'Signing in...' : 'Sign in'}</button>
+        <button type="button" className="mt-3 w-full text-center text-sm text-slate-600 underline" onClick={() => { setMode('forgot'); setError(''); setNotice(''); }} data-testid="vendor-forgot-link">Forgot your password?</button>
       </form>
     </div>
   );

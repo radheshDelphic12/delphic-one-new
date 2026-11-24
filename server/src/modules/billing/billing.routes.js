@@ -881,6 +881,29 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await paymentTracker.paymentTracker(req.user.org_id, paymentTracker.querySchema.parse(req.query))))
 );
 
+// One vendor resource marked paid (or not) for a month, on its own.
+const trackerError = (res, code) => {
+  const map = { not_a_vendor_resource: [404, 'That person is not a vendor resource of this company'], project_not_found: [404, 'Project not found'], not_marked: [404, 'This resource was not marked paid'] };
+  const [status, message] = map[code] || [400, 'Bad request'];
+  return fail(res, status, message);
+};
+router.put(
+  '/payment-tracker/resource-payment',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const r = await paymentTracker.markResourcePaid(req.user.org_id, req.user, paymentTracker.markSchema.parse(req.body || {}));
+    return r.error ? trackerError(res, r.error) : ok(res, r.payment);
+  })
+);
+router.delete(
+  '/payment-tracker/resource-payment',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const r = await paymentTracker.unmarkResourcePaid(req.user.org_id, paymentTracker.unmarkSchema.parse(req.query));
+    return r.error ? trackerError(res, r.error) : ok(res, { unmarked: true });
+  })
+);
+
 // The same collection routes for a vendor invoice: due date, next follow-up date, follow-up log.
 router.patch(
   '/vendor-invoices/:id/collection',

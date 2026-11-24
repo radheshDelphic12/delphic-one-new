@@ -28,7 +28,13 @@ Who may approve: anyone holding `vendor_portal.review`, or the **point of contac
 ## API
 Portal: `/api/v1/vendor-portal/*` (own auth). Company: `/api/v1/vendor-portal-admin/*` (company login + permission; see `lib/access/routeRules.js`).
 
+## Added later (2026-11-24)
+- **Notification:** when a vendor puts a candidate forward, the owner of the vendor account (the point of contact; the admins when it has none) gets a bell notification that opens Pipeline > Submissions. It can be muted in notification preferences (type `vendor_candidate_submitted`).
+- **Forgot password:** the portal sign-in has "Forgot your password?". It emails a one-hour link (`/vendor-portal?reset=...`); only a hash of the token is stored, the answer never says whether the email exists, and a used or expired link is refused. An admin can still reset a password from the vendor card.
+
+Related, in Finance: Vendor Invoices has a Collection filter (Overdue / Follow-up due / No due date set), and the Payment Tracker has a per-resource "This resource paid" column (Mark paid with date and note, Undo; table `vendor_resource_payments`).
+
 ## Not built (yet)
-Notifications to the point of contact when a candidate arrives (the inbox counter `GET /submissions/pending-count` is there for a badge), vendor self-service password reset, linking an approved profile directly to a pipeline submission.
+Linking an approved profile directly to a pipeline submission.
 
 Tests: `server/tests/vendor-portal.test.js` (15).
