@@ -22,6 +22,8 @@ const capacityQuerySchema = z.object({
   non_billable: z.enum(['1', '0', 'true', 'false']).optional().transform((v) => !(v === '0' || v === 'false')),
 });
 
+const periodQuerySchema = capacityQuerySchema.extend({ period: z.enum(['week', 'month', 'quarter']).default('month') });
+
 const endingSoonQuerySchema = z.object({
   from: optionalDate,
   to: optionalDate,
@@ -68,4 +70,4 @@ const teamChangeSchema = z.object({
 
 const endAllocationSchema = z.object({ end_date: optionalDate });
 
-module.exports = { settingsSchema, capacityQuerySchema, endingSoonQuerySchema, resourcesQuerySchema, movementsQuerySchema, moveSchema, teamChangeSchema, endAllocationSchema };
+module.exports = { settingsSchema, capacityQuerySchema, periodQuerySchema, endingSoonQuerySchema, resourcesQuerySchema, movementsQuerySchema, moveSchema, teamChangeSchema, endAllocationSchema };

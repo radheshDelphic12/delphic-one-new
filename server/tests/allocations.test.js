@@ -366,3 +366,53 @@ describe('Team capacity', () => {
     expect(await salaryTeam({ period_month: 7, period_year: 2026, team_id: growth.id })).toEqual([]);
   });
 });
+
+describe('Allocation by period', () => {
+  test('a week, month or quarter lists the projects each person of the team was on, in working days, and the people on each project', async () => {
+    const ctx = await seed();
+    const { assign, report, teamChange } = api(ctx);
+    const team = (await authed(request(app).post('/api/v1/teams'), ctx.adminToken).send({ name: 'IT Team' })).body.data;
+    const ana = await person(ctx, 'Ana Period');
+    const bo = await person(ctx, 'Bo Period');
+    const idle = await person(ctx, 'Idle Period');
+    for (const p of [ana, bo, idle]) expect((await teamChange({ org_membership_id: p.membership.id, team_id: team.id, effective_date: '2026-08-01' })).status).toBe(200);
+    const a = await project(ctx, 'Period A', { end: inDays(60) });
+    const b = await project(ctx, 'Period B', { end: inDays(60) });
+    expect((await assign({ account_id: a.id, org_membership_id: ana.membership.id, start_date: '2026-08-01' })).status).toBe(201);
+    expect((await assign({ account_id: b.id, org_membership_id: ana.membership.id, start_date: '2026-08-17' })).status).toBe(201);
+    expect((await assign({ account_id: a.id, org_membership_id: bo.membership.id, start_date: '2026-08-01' })).status).toBe(201);
+
+    // August 2026: 21 working days
+    const month = (await report('period-projects', { period: 'month', date: '2026-08-15', team_ids: team.id })).body.data;
+    expect(month.from).toBe('2026-08-01');
+    expect(month.to).toBe('2026-08-31');
+    expect(month.working_days).toBe(21);
+    const row = Object.fromEntries(month.rows.map((r) => [r.name, r]));
+    expect(row['Ana Period'].projects.map((p) => [p.name, p.days])).toEqual([['Period A', 21], ['Period B', 11]]);
+    expect(row['Idle Period'].project_count).toBe(0);
+    expect(month.unassigned).toBe(1);
+    const byProject = Object.fromEntries(month.projects.map((p) => [p.name, p]));
+    expect(byProject['Period A'].people_count).toBe(2);
+    expect(byProject['Period A'].person_days).toBe(42);
+    expect(byProject['Period B'].people.map((x) => x.name)).toEqual(['Ana Period']);
+
+    // the week of 10 Aug: 5 working days, project B not started yet
+    const week = (await report('period-projects', { period: 'week', date: '2026-08-12', team_ids: team.id })).body.data;
+    expect(week.from).toBe('2026-08-10');
+    expect(week.to).toBe('2026-08-16');
+    expect(week.rows.find((r) => r.name === 'Ana Period').projects.map((p) => [p.name, p.days])).toEqual([['Period A', 5]]);
+
+    // Q3: the team only starts on 1 Aug, so July does not count
+    const quarter = (await report('period-projects', { period: 'quarter', date: '2026-08-15', team_ids: team.id })).body.data;
+    expect(quarter.from).toBe('2026-07-01');
+    expect(quarter.to).toBe('2026-09-30');
+    expect(quarter.rows.find((r) => r.name === 'Bo Period').team_days).toBe(43);
+
+    // somebody not on the team is left out
+    const other = await person(ctx, 'Other Period');
+    const all = (await report('period-projects', { period: 'month', date: '2026-08-15' })).body.data;
+    expect(all.rows.map((r) => r.name)).toContain('Other Period');
+    expect(month.rows.map((r) => r.name)).not.toContain('Other Period');
+    expect(other.membership.id).toBeTruthy();
+  });
+});

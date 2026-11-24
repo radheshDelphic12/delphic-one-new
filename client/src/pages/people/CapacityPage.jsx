@@ -15,6 +15,7 @@ import ProjectsHover from './ProjectsHover.jsx';
 const TABS = [
   { key: 'capacity', label: 'Team Capacity', icon: Gauge },
   { key: 'employees', label: 'Employees & Projects', icon: Users },
+  { key: 'period', label: 'Allocation by Period', icon: CalendarClock },
   { key: 'ending', label: 'Projects Ending Soon', icon: CalendarClock },
   { key: 'movements', label: 'Movement History', icon: History },
 ];
@@ -311,6 +312,82 @@ function EmployeeProjectsReport() {
   );
 }
 
+const PERIODS = [['week', 'Week (Mon-Sun)'], ['month', 'Month'], ['quarter', 'Quarter']];
+
+/** Allocation by period: which projects each person was on across a week, month or quarter, and who was on each project. */
+function PeriodReport() {
+  const teams = useTeamOptions(true);
+  const [filters, setFilters] = useState(() => ({ date: localToday(), period: 'month', team_ids: [] }));
+  const [view, setView] = useState('people'); // people | projects
+  const [search, setSearch] = useState('');
+  const [openProject, setOpenProject] = useState(null);
+  const [openPerson, setOpenPerson] = useState(null);
+  const query = useMemo(() => ({ ...filters, team_ids: filters.team_ids.join(',') }), [filters]);
+  const { data, loading } = useReport('/allocations/reports/period-projects', query);
+  const set = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
+  const q = search.trim().toLowerCase();
+  const people = useMemo(() => (data?.rows || []).filter((r) => !q || [r.name, r.employee_code, ...r.projects.map((p) => p.name)].some((v) => String(v || '').toLowerCase().includes(q))), [data, q]);
+  const projects = useMemo(() => (data?.projects || []).filter((p) => !q || [p.name, p.code, p.client_name, ...p.people.map((x) => x.name)].some((v) => String(v || '').toLowerCase().includes(q))), [data, q]);
+
+  const personColumns = [
+    { key: 'name', header: 'Employee', render: (r) => <span><span className="font-medium text-tertiary-900">{r.name}</span>{r.employee_code && <span className="block text-xs text-tertiary-500">{r.employee_code}</span>}</span> },
+    { key: 'team', header: 'Team', render: (r) => r.team?.name || <span className="text-tertiary-400">No team</span> },
+    { key: 'count', header: 'Projects', render: (r) => <CountButton label={`${r.name}: ${r.project_count} projects`} onClick={() => setOpenPerson(r)}>{r.project_count}</CountButton> },
+    { key: 'projects', header: `Projects in the period (${data?.working_days ?? '…'} working days)`, render: (r) => (r.projects.length === 0 ? <Pill tone="gray">No project in this period</Pill> : (
+      <div className="flex flex-wrap gap-1.5">
+        {r.projects.map((p) => <span key={p.id} title={[p.code, p.client_name].filter(Boolean).join(' · ')}><Pill tone="green">{p.name} · {p.days}d</Pill></span>)}
+      </div>
+    )) },
+  ];
+  const projectColumns = [
+    { key: 'name', header: 'Project', render: (p) => <span><span className="font-medium text-tertiary-900">{p.name}</span><span className="block text-xs text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span> },
+    { key: 'people', header: 'People', render: (p) => <CountButton label={`${p.name}: ${p.people_count} people`} onClick={() => setOpenProject(p)}>{p.people_count}</CountButton> },
+    { key: 'days', header: 'Person-days', render: (p) => p.person_days },
+    { key: 'who', header: 'Who', render: (p) => <span className="text-xs text-tertiary-600">{p.people.slice(0, 6).map((x) => `${x.name} (${x.days}d)`).join(', ')}{p.people.length > 6 ? ` +${p.people.length - 6} more` : ''}</span> },
+  ];
+
+  return (
+    <div className="space-y-4" data-testid="period-report">
+      <div className="grid gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Filter label="Period">
+          <select value={filters.period} onChange={(e) => set('period', e.target.value)} className={dateInput} aria-label="Period">{PERIODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        </Filter>
+        <Filter label="Any day inside the period"><input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={dateInput} /></Filter>
+        <Filter label="Teams">
+          <MultiSelectDropdown value={filters.team_ids} onChange={(ids) => set('team_ids', ids)} options={teams.map((t) => ({ id: t.value, label: t.label }))} placeholder="All teams" searchPlaceholder="Search teams…" emptyMessage="No teams" />
+        </Filter>
+        <Filter label="Search">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-tertiary-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Employee or project" className={`${dateInput} pl-9`} />
+          </div>
+        </Filter>
+      </div>
+      {data && <p className="text-sm text-tertiary-700">{formatDay(data.from)} → {formatDay(data.to)} · {data.working_days} working days · {data.rows.length} people · {data.projects.length} projects · <CountButton label="People with no project in this period" onClick={() => { setView('people'); setSearch(''); }}>{data.unassigned} with no project</CountButton></p>}
+      <div className="flex gap-2">
+        {[['people', 'By employee'], ['projects', 'By project']].map(([k, l]) => <button key={k} type="button" onClick={() => setView(k)} className={view === k ? 'btn-primary' : 'btn-secondary'}>{l}</button>)}
+      </div>
+      {view === 'people'
+        ? <DataTable columns={personColumns} rows={people} loading={loading} onRowClick={setOpenPerson} emptyLabel="Nobody on the chosen team(s) in this period." />
+        : <DataTable columns={projectColumns} rows={projects} loading={loading} onRowClick={setOpenProject} emptyLabel="No project allocations in this period." />}
+      <Drawer open={Boolean(openProject)} title={openProject ? `${openProject.name} · people in the period` : ''} onClose={() => setOpenProject(null)} size="lg">
+        {openProject && (
+          <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100 text-sm">
+            {openProject.people.map((x) => <li key={x.id} className="flex justify-between px-4 py-2"><span>{x.name}{x.employee_code ? <span className="ml-2 text-xs text-tertiary-500">{x.employee_code}</span> : null}</span><Pill tone="green">{x.days} day{x.days === 1 ? '' : 's'}</Pill></li>)}
+          </ul>
+        )}
+      </Drawer>
+      <Drawer open={Boolean(openPerson)} title={openPerson ? `${openPerson.name} · projects in the period` : ''} onClose={() => setOpenPerson(null)} size="lg">
+        {openPerson && (openPerson.projects.length === 0 ? <p className="text-sm text-tertiary-500">No running project allocation in this period.</p> : (
+          <ul className="divide-y divide-tertiary-100 rounded-2xl border border-tertiary-100 text-sm">
+            {openPerson.projects.map((p) => <li key={p.id} className="flex justify-between px-4 py-2"><span>{p.name}<span className="ml-2 text-xs text-tertiary-500">{[p.code, p.client_name].filter(Boolean).join(' · ')}</span></span><Pill tone="green">{p.days} of {openPerson.team_days} days</Pill></li>)}
+          </ul>
+        ))}
+      </Drawer>
+    </div>
+  );
+}
+
 /** One ending project: its dates, client and the people on it. */
 function EndingProjectDrawer({ row, onClose }) {
   return (
@@ -404,6 +481,7 @@ export default function CapacityPage() {
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'capacity' && <TeamCapacityReport />}
       {tab === 'employees' && <EmployeeProjectsReport />}
+      {tab === 'period' && <PeriodReport />}
       {tab === 'ending' && <EndingSoonReport />}
       {tab === 'movements' && <MovementReport />}
     </div>

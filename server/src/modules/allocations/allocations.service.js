@@ -824,7 +824,90 @@ async function movements(orgId, { from, to, team_id, org_membership_id } = {}) {
   return { from: A.ymd(f), to: A.ymd(t), rows };
 }
 
+// The Monday-to-Sunday week, the calendar month or the calendar quarter that contains `day`.
+function periodRange(period, day) {
+  const y = day.getUTCFullYear();
+  const m = day.getUTCMonth();
+  if (period === 'week') {
+    const back = (day.getUTCDay() + 6) % 7;
+    const from = A.addDays(day, -back);
+    return { from, to: A.addDays(from, 6) };
+  }
+  if (period === 'quarter') {
+    const q = Math.floor(m / 3) * 3;
+    return { from: new Date(Date.UTC(y, q, 1)), to: new Date(Date.UTC(y, q + 3, 0)) };
+  }
+  return { from: new Date(Date.UTC(y, m, 1)), to: new Date(Date.UTC(y, m + 1, 0)) };
+}
+
+/**
+ * Allocation by period: for a week, month or quarter, the projects each person of the chosen team(s) was allocated to and for how many
+ * working days (Mon-Fri), and the people on each project. Same rules as Employees & Projects: a day counts when the allocation span covers
+ * it, the project's own contract is running (or upcoming) that day, the person is employed and on one of the chosen teams that day.
+ */
+async function periodProjects(orgId, { date, period = 'month', team_id, team_ids } = {}) {
+  const onlyTeams = new Set([...(team_ids || []), ...(team_id ? [team_id] : [])]);
+  const anchor = A.toDate(date) || todayIst();
+  const { from, to } = periodRange(period, anchor);
+  const days = A.weekdaysBetween(from, to);
+  const [ctx, spans] = await Promise.all([
+    loadPeopleAndTeams(orgId),
+    prisma.projectMemberAssignment.findMany({
+      where: {
+        org_id: orgId,
+        AND: [{ OR: [{ start_date: null }, { start_date: { lte: to } }] }, { OR: [{ end_date: null }, { end_date: { gte: from } }] }],
+      },
+      select: { org_membership_id: true, allocation_percent: true, start_date: true, end_date: true, account: { select: ACCOUNT_SELECT } },
+    }),
+  ]);
+  const spansBy = new Map();
+  for (const s of spans) spansBy.set(s.org_membership_id, [...(spansBy.get(s.org_membership_id) || []), s]);
+  const rows = [];
+  const byProject = new Map();
+  for (const m of ctx.memberships) {
+    let teamDays = 0;
+    let lastTeam = null;
+    const perProject = new Map();
+    for (const d of days) {
+      if (!employedOn(m, d)) continue;
+      const teamId = ctx.teamOf(m.id, d);
+      if (onlyTeams.size && !onlyTeams.has(teamId)) continue;
+      teamDays += 1;
+      lastTeam = teamId;
+      for (const s of spansBy.get(m.id) || []) {
+        if (!A.activeOn(s, d)) continue;
+        if (!(contractRunning(s.account, d) || contractUpcoming(s.account, d))) continue;
+        const cur = perProject.get(s.account.id) || { ...describeProject(s.account), days: 0, allocation_percent: s.allocation_percent !== null ? Number(s.allocation_percent) : null };
+        cur.days += 1;
+        perProject.set(s.account.id, cur);
+      }
+    }
+    if (!teamDays) continue;
+    const projects = [...perProject.values()].sort((a, b) => b.days - a.days || a.name.localeCompare(b.name));
+    rows.push({
+      id: m.id,
+      name: m.person.name,
+      employee_code: m.employee_code,
+      worker_type: m.worker_type,
+      team: lastTeam ? { id: lastTeam, name: ctx.teamsById.get(lastTeam)?.name || null } : null,
+      team_days: teamDays,
+      projects,
+      project_count: projects.length,
+    });
+    for (const p of projects) {
+      const entry = byProject.get(p.id) || { id: p.id, code: p.code, name: p.name, client_name: p.client_name, people: [], person_days: 0 };
+      entry.people.push({ id: m.id, name: m.person.name, employee_code: m.employee_code, days: p.days });
+      entry.person_days += p.days;
+      byProject.set(p.id, entry);
+    }
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  const projects = [...byProject.values()].map((p) => ({ ...p, people_count: p.people.length, people: p.people.sort((a, b) => b.days - a.days || a.name.localeCompare(b.name)) })).sort((a, b) => b.person_days - a.person_days || a.name.localeCompare(b.name));
+  return { period, from: A.ymd(from), to: A.ymd(to), working_days: days.length, rows, projects, unassigned: rows.filter((r) => !r.project_count).length };
+}
+
 module.exports = {
+  periodProjects,
   assign,
   endAllocation,
   deleteAllocation,
