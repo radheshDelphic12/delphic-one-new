@@ -20,7 +20,7 @@ export const walletKey = (id) => `w:${id}`;
 
 /** `accounts` is the Bank view tree flattened to accounts (each with its wallets); `selected` a Set of account / wallet keys. */
 export function selectionTotals(accounts, selected) {
-  const totals = { INR: 0, USD: 0 };
+  const totals = { INR: 0, USD: 0, AED: 0 };
   let accountsCount = 0;
   let walletsCount = 0;
   for (const account of accounts) {
@@ -35,10 +35,10 @@ export function selectionTotals(accounts, selected) {
       walletsCount += 1;
     }
   }
-  return { INR: fromPaise(totals.INR), USD: fromPaise(totals.USD), accounts: accountsCount, wallets: walletsCount };
+  return { INR: fromPaise(totals.INR), USD: fromPaise(totals.USD), AED: fromPaise(totals.AED), accounts: accountsCount, wallets: walletsCount };
 }
 
-export const SYMBOL = { INR: '₹', USD: '$' };
+export const SYMBOL = { INR: '₹', USD: '$', AED: 'AED ' };
 export const formatMoney = (amount, currency) => {
   const paise = toPaise(amount);
   const [whole, frac] = fromPaise(Math.abs(paise)).split('.');

@@ -680,7 +680,7 @@ async function previewVendorInvoice(orgId, vendorAccountId, period) {
 // (Re)generates the vendor's invoice for the month: one row per project and
 // currency. Rows generated earlier for the same vendor and month are
 // replaced; invoices added by hand are left alone.
-async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes, bill_to, save_to_account, amounts }) {
+async function generateVendorInvoice(orgId, user, { vendor_account_id, period_month, period_year, invoice_number, invoice_date, notes, bill_to, save_to_account, amounts, due_date }) {
   const period = { period_month, period_year };
   const frozen = await financialLock.assertOpen(orgId, period_month, period_year);
   if (frozen) return frozen;
@@ -699,7 +699,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
   }
   const billable = src.projects.filter((p) => p.amount > 0);
   if (!billable.length) return { error: 'nothing_to_invoice' };
-  const previous = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id, ...period, details: { not: Prisma.DbNull } }, select: { id: true, invoice_number: true } });
+  const previous = await prisma.projectVendorInvoice.findMany({ where: { org_id: orgId, vendor_account_id, ...period, details: { not: Prisma.DbNull } }, select: { id: true, invoice_number: true, account_id: true, due_date: true, next_followup_date: true } });
   const number = (invoice_number || '').trim() || previous[0]?.invoice_number || (await suggestVendorNumber(orgId, period_year));
   const date = new Date(invoice_date || todayYmd());
   const printedBillTo = await resolveBillTo(orgId, user, vendor_account_id, bill_to, save_to_account);
@@ -708,6 +708,7 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
   const rows = await prisma.$transaction(async (tx) => {
     if (previous.length) await tx.projectVendorInvoice.deleteMany({ where: { id: { in: previous.map((p) => p.id) } } });
     const created = [];
+    const before = new Map(previous.map((p) => [p.account_id, p])); // what each replaced invoice had: due date, next follow-up, follow-up log
     for (const p of billable) {
       const figures = vendorCharges.chargeAmounts(p.amount, vendorChargeList);
       created.push(await tx.projectVendorInvoice.create({
@@ -722,6 +723,8 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
           gst_amount: figures.gst_amount,
           tds_amount: figures.tds_amount,
           other_amount: figures.other_amount,
+          due_date: due_date ? new Date(`${due_date}T00:00:00.000Z`) : before.get(p.project.id)?.due_date || null,
+          next_followup_date: before.get(p.project.id)?.next_followup_date || null,
           currency: p.currency,
           notes: notes || null,
           details: { ...(figures.lines.length ? { charges: figures.lines } : {}), ...(printedBillTo ? { bill_to: printedBillTo } : {}), project: p.project, contractors: p.contractors, ...(p.adjustments?.length ? { adjustments: p.adjustments } : {}), exchange_rate: p.exchange_rate, amount_inr: p.amount_inr, source: src.source, locked_version: src.locked_version, ...(p.manual_override ? { manual_override: p.manual_override } : {}) },
@@ -733,6 +736,11 @@ async function generateVendorInvoice(orgId, user, { vendor_account_id, period_mo
     await tx.auditLog.create({
       data: { org_id: orgId, actor_id: user.id, action: previous.length ? 'vendor_invoice_refresh' : 'vendor_invoice_generate', entity_type: 'vendor_invoice', entity_id: vendor_account_id, reason: `Vendor invoice ${number} for ${src.vendor.name} ${period_month}/${period_year}`, snapshot: { rows: created.map((r) => r.id), source: src.source } },
     });
+    // the follow-up notes written on a replaced invoice stay with the new one
+    for (let i = 0; i < created.length; i += 1) {
+      const old = before.get(created[i].account_id);
+      if (old) await tx.invoiceFollowup.updateMany({ where: { invoice_kind: 'vendor_invoice', invoice_id: old.id }, data: { invoice_id: created[i].id } });
+    }
     return created;
   });
   return { invoices: rows.map(serializeVendorInvoice) };
@@ -754,6 +762,8 @@ function serializeVendorInvoice(row) {
     net_payable: round2(Number(row.amount) + Number(row.gst_amount || 0) + Number(row.other_amount || 0) - Number(row.tds_amount || 0) + Number(row.adjustment_amount || 0)),
     sent: Boolean(row.sent_at),
     invoice_date: row.invoice_date ? ymd(row.invoice_date) : null,
+    due_date: row.due_date ? ymd(row.due_date) : null,
+    next_followup_date: row.next_followup_date ? ymd(row.next_followup_date) : null,
     project: row.details?.project?.name ? row.details.project : row.account ? billingEngine.describeProject(row.account) : null,
     generated: Boolean(row.details),
   };
@@ -776,7 +786,17 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
     ? await prisma.document.groupBy({ by: ['entity_id'], where: { entity_type: 'project_vendor_invoice', entity_id: { in: rows.map((r) => r.id) } }, _count: { _all: true } })
     : [];
   const filesBy = new Map(fileCounts.map((g) => [g.entity_id, g._count._all]));
-  return rows.map((row) => ({ ...serializeVendorInvoice(row), paid: paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`), file_count: filesBy.get(row.id) || 0 }));
+  const chases = await followups.summaries('vendor_invoice', rows.map((r) => r.id));
+  return rows.map((row) => {
+    const isPaid = paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`);
+    const chase = chases.get(row.id);
+    // overdue = still unpaid after the due date; follow-up due = the next follow-up date has come (the same rules as a client invoice)
+    return {
+      ...serializeVendorInvoice(row), paid: isPaid, file_count: filesBy.get(row.id) || 0,
+      ...followups.collectionState({ due_date: row.due_date, next_followup_date: row.next_followup_date, open: !isPaid }),
+      followup_count: chase?.followup_count || 0, last_followup_note: chase?.last_followup_note || null, last_followup_on: chase?.last_followup_on || null,
+    };
+  });
 }
 
 module.exports = {

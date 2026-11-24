@@ -55,6 +55,36 @@ describe('invoice maths', () => {
 });
 
 describe('group cash: invoices', () => {
+  test('an export invoice can be billed in AED: needs an AED wallet, shows in its own AED totals, never mixed with USD / INR', async () => {
+    const aedAcc = d(await post('/accounts', { legal_entity_id: entity.id, name: 'AED A/C', type: 'current', currency: 'AED', opening_date: '2026-04-01', payment_instructions: 'Bank: Emirates NBD, SWIFT: EBILAEAD, IBAN AE00 1234' })).account;
+    expect(aedAcc.currency).toBe('AED');
+    const aedWallet = d(await post('/wallets', { bank_account_id: aedAcc.id, owner_org_id: org.id, name: 'Delphic AED' })).wallet;
+    const body = { type: 'usd_export', buyer_gstin: undefined, buyer_state_code: undefined, lines: [line({ qty: '2', rate: '750.25', gst_rate: 0, hsn_sac: '998313' })] };
+
+    // the currency has to match the receiving wallet, and only USD / AED are allowed for an export
+    expect((await invoice({ ...body, currency: 'AED', receiving_wallet_id: usdWallet.id })).status).toBe(422);
+    expect((await invoice({ ...body, currency: 'AED', receiving_wallet_id: aedWallet.id.replace(/.$/, '0') })).status).toBeGreaterThanOrEqual(400);
+    expect((await invoice({ ...body, currency: 'EUR', receiving_wallet_id: aedWallet.id })).status).toBe(422);
+    expect((await invoice({ ...body, receiving_wallet_id: aedWallet.id })).status).toBe(422); // no currency = USD, but the wallet is AED
+
+    const aed = d(await invoice({ ...body, currency: 'AED', receiving_wallet_id: aedWallet.id })).invoice;
+    expect(aed).toMatchObject({ currency: 'AED', type: 'usd_export', total: '1500.50', igst: '0.00' });
+    expect(aed.payment_instructions).toMatch(/SWIFT/);
+    // GST and non-GST invoices stay INR whatever is sent
+    expect(d(await invoice({ currency: undefined })).invoice.currency).toBe('INR');
+    // a plain export still defaults to USD
+    expect(d(await invoice({ ...body, receiving_wallet_id: usdWallet.id })).invoice.currency).toBe('USD');
+
+    // totals are kept apart per currency
+    const list = d(await get('/invoices'));
+    expect(list.totals).toMatchObject({ AED: '1500.50', USD: '1500.50' });
+    expect(list.outstanding.AED).toBe('1500.50');
+    // the AED payment goes into the AED wallet
+    const paid = await post(`/invoices/${aed.id}/payments`, { date: '2026-05-12', amount: '500.00', mode: 'swift' });
+    expect(paid.status).toBe(201);
+    expect(Number(d(await get('/position')).totals.AED)).toBe(500);
+  });
+
   test('only the group superadmin may issue invoices', async () => {
     expect((await invoice({}).then((r) => r.status))).toBe(201);
     expect((await authed(request(app).get(`${G}/invoices`), adminToken)).status).toBe(403);
@@ -172,8 +202,8 @@ describe('group cash: invoices', () => {
     await invoice({ type: 'usd_export', receiving_wallet_id: usdWallet.id, buyer_gstin: undefined, buyer_state_code: undefined, lines: [line({ rate: '100', gst_rate: 0 })], workspace_id: org.id });
     const all = d(await get('/invoices'));
     expect(all.rows).toHaveLength(2);
-    expect(all.totals).toEqual({ INR: '11800.00', USD: '100.00' });
-    expect(all.outstanding).toEqual({ INR: '11800.00', USD: '100.00' });
+    expect(all.totals).toEqual({ INR: '11800.00', USD: '100.00', AED: '0.00' });
+    expect(all.outstanding).toEqual({ INR: '11800.00', USD: '100.00', AED: '0.00' });
     expect(d(await get('/invoices?status=overdue')).rows.map((r) => r.id)).toEqual([a.id]);
     expect(d(await get(`/invoices?workspace_id=${org.id}`)).rows).toHaveLength(1);
     expect(d(await get('/invoices?search=acme')).rows).toHaveLength(2);

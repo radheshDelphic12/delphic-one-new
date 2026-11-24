@@ -12,6 +12,7 @@ import VendorPayoutPanel from './VendorPayoutPanel.jsx';
 import ContractChargesSection from '../../components/finance/ContractChargesSection.jsx';
 import FilesPanel from '../../components/FilesPanel.jsx';
 import { PurchaseDrawer, PayPurchaseDrawer } from './VendorPurchaseDrawers.jsx';
+import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 import { promptAction } from '../../lib/confirmAction.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -108,6 +109,7 @@ export default function VendorInvoicesTab() {
   const [payFor, setPayFor] = useState(null);
   const [traceId, setTraceId] = useState(null);
   const [filesFor, setFilesFor] = useState(null); // the invoice whose files are open
+  const [chaseFor, setChaseFor] = useState(null); // the vendor invoice whose due date / follow-ups are open
   const [searchParams] = useSearchParams();
   const [view, setView] = useState('invoices');
   // the hub's hover menu links straight to a view: ?section=vendor-invoices&view=payout
@@ -208,6 +210,29 @@ export default function VendorInvoicesTab() {
     { key: 'tds', header: 'TDS', render: (r) => `-${money(r.tds_amount, r.currency)}` },
     { key: 'adjustment', header: 'Adjustment', render: (r) => money(r.adjustment_amount, r.currency) },
     { key: 'net', header: 'Net payable', render: (r) => <span className="font-semibold">{money(r.net_payable, r.currency)}</span> },
+    {
+      key: 'due',
+      header: 'Due date',
+      render: (r) => {
+        const due = r.due_date ? String(r.due_date).slice(0, 10) : '';
+        return (
+          <span className="whitespace-nowrap text-xs">
+            {due || <span className="text-tertiary-400">not set</span>}
+            {r.kind !== 'purchase' && r.overdue && <span className="block font-medium text-danger-600">{r.days_overdue} day{r.days_overdue === 1 ? '' : 's'} overdue</span>}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'followup',
+      header: 'Next follow-up',
+      render: (r) => (r.kind === 'purchase' ? <span className="text-tertiary-400">—</span> : (
+        <span className="text-xs">
+          {r.next_followup_date ? <span className={r.followup_due ? 'font-semibold text-warning-700' : ''}>{r.next_followup_date}</span> : '—'}
+          {r.followup_count > 0 && <span className="block max-w-[14rem] truncate text-tertiary-500" title={r.last_followup_note}>{r.last_followup_note}</span>}
+        </span>
+      )),
+    },
     { key: 'sent', header: 'Sent', render: (r) => (r.kind === 'purchase' ? '—' : r.sent ? 'Sent' : 'Unsent') },
     { key: 'paid', header: 'Payment', render: (r) => (r.kind === 'purchase' && r.status === 'cancelled' ? <span className="text-danger-600">Cancelled</span> : r.paid ? `Paid${r.paid_on ? ` ${r.paid_on}` : ''}` : 'Unpaid') },
     {
@@ -227,6 +252,7 @@ export default function VendorInvoicesTab() {
           <button type="button" className="btn-ghost text-xs" onClick={() => track(r, { sent: !r.sent }, r.sent ? 'Marked unsent' : 'Marked sent')}>{r.sent ? 'Mark unsent' : 'Mark sent'}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>GST / TDS / adjustment</button>
           <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-files" onClick={() => setFilesFor(r)}>Files{r.file_count ? ` (${r.file_count})` : ''}</button>
+          {!r.paid && <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-followup" onClick={() => setChaseFor(r)}>Due date / follow-up{r.followup_count ? ` (${r.followup_count})` : ''}</button>}
           <button type="button" className="btn-ghost text-xs" onClick={() => setTraceId(r.id)}>Trace</button>
         </span>
       )),
@@ -260,6 +286,7 @@ export default function VendorInvoicesTab() {
       </div>
       <DataTable columns={columns} rows={tableRows} loading={!rows} emptyLabel="No vendor invoices or purchases for this month" maxHeight="calc(100dvh - 22rem)" />
       <TraceDrawer invoiceId={traceId} onClose={() => setTraceId(null)} />
+      <InvoiceCollectionDrawer invoice={chaseFor} title={chaseFor ? `Payment follow-up: ${chaseFor.vendor_account?.name || 'Vendor'} ${chaseFor.invoice_number || ''}`.trim() : ''} basePath={chaseFor ? `/billing/vendor-invoices/${chaseFor.id}` : ''} onClose={() => setChaseFor(null)} onChanged={load} />
       <PurchaseDrawer open={purchaseDrawer.open} purchase={purchaseDrawer.purchase} vendors={vendors} onClose={() => setPurchaseDrawer({ open: false, purchase: null })} onSubmit={savePurchase} />
       <PayPurchaseDrawer purchase={payFor} onClose={() => setPayFor(null)} onSubmit={payPurchase} />
       <Drawer open={Boolean(filesFor)} title={filesFor ? `Files: ${filesFor.vendor_account?.name || 'Vendor'} ${filesFor.invoice_number || filesFor.bill_number || ''}`.trim() : 'Files'} onClose={() => { setFilesFor(null); load(); }}>

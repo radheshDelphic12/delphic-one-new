@@ -1565,6 +1565,9 @@ model ProjectVendorInvoice {
   // GST added and any other charge line (net of deductions), worked out from the vendor's charges when the invoice is generated; payable = amount + gst + other - TDS + adjustment.
   gst_amount        Decimal   @default(0) @db.Decimal(14, 2)
   other_amount      Decimal   @default(0) @db.Decimal(14, 2)
+  // Payment follow-up, the same as a client invoice: when we have to pay the vendor, and when we next look at it (the notes of each follow-up live in invoice_followups).
+  due_date           DateTime? @db.Date
+  next_followup_date DateTime? @db.Date
   created_by        String    @db.Uuid
   creator           User      @relation("ProjectVendorInvoiceCreatedBy", fields: [created_by], references: [id])
   created_at        DateTime  @default(now())
@@ -9695,7 +9698,7 @@ model GroupReceivableSetting {
 // Shared by client invoices (Finance > Invoicing) and group invoices (Book Keeping); no FK because it points at either table.
 model InvoiceFollowup {
   id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  invoice_kind       String // client_invoice | group_invoice
+  invoice_kind       String // client_invoice | group_invoice | vendor_invoice | dox_invoice
   invoice_id         String    @db.Uuid
   org_id             String?   @db.Uuid
   org_group_id       String?   @db.Uuid

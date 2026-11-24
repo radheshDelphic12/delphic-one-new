@@ -23,6 +23,8 @@ const invoiceBody = z.object({
   legal_entity_id: z.string().uuid(),
   workspace_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable().optional()),
   type: z.enum(TYPES),
+  // an export invoice is billed in USD (default) or AED; GST and non-GST invoices are always INR
+  currency: z.enum(['USD', 'AED']).optional(),
   // optional overrides: a hand-typed invoice number (blank = next in the series) and the issuing company's address for this invoice
   number: text(50),
   seller_address: text(500),

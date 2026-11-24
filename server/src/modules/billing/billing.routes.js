@@ -873,6 +873,32 @@ router.post(
   })
 );
 
+// The same collection routes for a vendor invoice: due date, next follow-up date, follow-up log.
+router.patch(
+  '/vendor-invoices/:id/collection',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.setTerms('vendor_invoice', { orgId: req.user.org_id }, req.params.id, followupsService.termsSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : ok(res, result.terms);
+  })
+);
+router.get(
+  '/vendor-invoices/:id/followups',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.list('vendor_invoice', { orgId: req.user.org_id }, req.params.id);
+    return result.error ? collectionFail(res, result.error) : ok(res, result);
+  })
+);
+router.post(
+  '/vendor-invoices/:id/followups',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await followupsService.add('vendor_invoice', { orgId: req.user.org_id }, req.user, req.params.id, followupsService.followupSchema.parse(req.body || {}));
+    return result.error ? collectionFail(res, result.error) : created(res, result.followup);
+  })
+);
+
 router.post(
   '/invoices/:id/status',
   requireOrgMembership,

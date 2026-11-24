@@ -18,7 +18,7 @@ const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 te
 const labelCls = 'block text-xs font-medium text-tertiary-600';
 const today = () => new Date().toLocaleDateString('en-CA');
 const api = (path, params) => apiClient.get(`/group-cash${path}`, { params }).then((r) => r.data.data);
-const TYPE_LABEL = { gst: 'GST invoice', non_gst: 'Non-GST invoice', usd_export: 'USD export invoice' };
+const TYPE_LABEL = { gst: 'GST invoice', non_gst: 'Non-GST invoice', usd_export: 'Export invoice (USD / AED)' };
 const STATUS = { unpaid: ['amber', 'Unpaid'], partially_paid: ['blue', 'Part paid'], paid: ['green', 'Paid'], overdue: ['red', 'Overdue'], cancelled: ['gray', 'Cancelled'] };
 const MODES = [['neft', 'NEFT'], ['rtgs', 'RTGS'], ['imps', 'IMPS'], ['upi', 'UPI'], ['cheque', 'Cheque'], ['cash', 'Cash'], ['swift', 'SWIFT'], ['other', 'Other']];
 const GST_RATES = [0, 5, 12, 18, 28, 3, 0.25];
@@ -49,7 +49,7 @@ function preview(type, lines, intra) {
 
 function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, onClose, onSaved }) {
   const { pushSuccess, pushError } = useAlerts();
-  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '', tds_rate: '' };
+  const empty = { legal_entity_id: defaultEntityId || '', type: 'gst', currency: 'USD', invoice_date: today(), due_date: '', workspace_id: '', number: '', seller_address: '', contract_id: '', contract_month: '', contract_year: '', buyer_name: '', buyer_gstin: '', buyer_address: '', buyer_state_code: '', receiving_wallet_id: '', notes: '', payment_instructions: '', tds_rate: '' };
   const [v, setV] = useState(empty);
   const [lines, setLines] = useState([blankLine()]);
   // Customers / vendors held in Accounts: pick one to fill the bill-to block, and optionally save edits back to it.
@@ -75,14 +75,14 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
   useEffect(() => {
     if (!open) return;
     if (invoice) {
-      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', number: invoice.number, seller_address: invoice.seller?.address || '', contract_id: invoice.contract_id || '', contract_month: invoice.contract_month || '', contract_year: invoice.contract_year || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '', tds_rate: Number(invoice.tds_rate) ? String(invoice.tds_rate) : '' });
+      setV({ legal_entity_id: invoice.legal_entity_id, type: invoice.type, currency: invoice.type === 'usd_export' ? invoice.currency : 'USD', invoice_date: invoice.invoice_date, due_date: invoice.due_date || '', workspace_id: invoice.workspace_id || '', number: invoice.number, seller_address: invoice.seller?.address || '', contract_id: invoice.contract_id || '', contract_month: invoice.contract_month || '', contract_year: invoice.contract_year || '', buyer_name: invoice.buyer_name, buyer_gstin: invoice.buyer_gstin || '', buyer_address: invoice.buyer_address || '', buyer_state_code: invoice.buyer_state_code || invoice.place_of_supply || '', receiving_wallet_id: invoice.receiving_wallet_id, notes: invoice.notes || '', payment_instructions: invoice.payment_instructions || '', tds_rate: Number(invoice.tds_rate) ? String(invoice.tds_rate) : '' });
       setLines(invoice.lines.map((l) => ({ description: l.description, hsn_sac: l.hsn_sac || '', qty: String(l.qty), rate: String(l.rate), gst_rate: l.gst_rate })));
     } else { setV(empty); setLines([blankLine()]); }
   }, [open, invoice]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value, ...(k === 'type' || k === 'legal_entity_id' ? { receiving_wallet_id: '' } : {}) }));
+  const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value, ...(k === 'type' || k === 'legal_entity_id' || k === 'currency' ? { receiving_wallet_id: '' } : {}) }));
   const setLine = (i, k) => (e) => setLines((c) => c.map((l, j) => (j === i ? { ...l, [k]: e.target.value } : l)));
   const entity = entities.find((x) => x.id === v.legal_entity_id);
-  const currency = v.type === 'usd_export' ? 'USD' : 'INR';
+  const currency = v.type === 'usd_export' ? v.currency || 'USD' : 'INR';
   // Every wallet this entity can receive into, whatever its type (current, savings, advance ...): the same rule the server applies - not tied
   // to another legal entity (by its bank account or as owner) - and in the invoice's currency. A wallet with no bank account yet counts too.
   const allEntityWallets = useMemo(() => (options?.wallets || []).filter((w) => (!w.account_legal_entity_id || w.account_legal_entity_id === v.legal_entity_id) && (!w.owner_legal_entity_id || w.owner_legal_entity_id === v.legal_entity_id)), [options, v.legal_entity_id]);
@@ -96,7 +96,7 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
     e.preventDefault();
     setBusy(true);
     try {
-      const body = { ...v, workspace_id: v.workspace_id || null, contract_id: v.contract_id || null, contract_month: v.contract_id && v.contract_month ? Number(v.contract_month) : null, contract_year: v.contract_id && v.contract_year ? Number(v.contract_year) : null, due_date: v.due_date || null, tds_rate: v.tds_rate === '' ? 0 : Number(v.tds_rate), lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
+      const body = { ...v, currency: v.type === 'usd_export' ? v.currency || 'USD' : undefined, workspace_id: v.workspace_id || null, contract_id: v.contract_id || null, contract_month: v.contract_id && v.contract_month ? Number(v.contract_month) : null, contract_year: v.contract_id && v.contract_year ? Number(v.contract_year) : null, due_date: v.due_date || null, tds_rate: v.tds_rate === '' ? 0 : Number(v.tds_rate), lines: lines.map((l) => ({ ...l, hsn_sac: l.hsn_sac || null, gst_rate: Number(l.gst_rate) })) };
       const { legal_entity_id: entityId, ...rest } = body;
       const res = invoice ? await apiClient.patch(`/group-cash/invoices/${invoice.id}`, rest) : await apiClient.post('/group-cash/invoices', body);
       pushSuccess(invoice ? `Invoice ${res.data.data.invoice.number} updated` : `Invoice ${res.data.data.invoice.number} issued`);
@@ -122,6 +122,11 @@ function NewInvoiceDrawer({ open, options, entities, invoice, defaultEntityId, o
           <label className={labelCls}>Type
             <select className={inputCls} value={v.type} onChange={set('type')}>{Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           </label>
+          {v.type === 'usd_export' && (
+            <label className={labelCls}>Currency
+              <select className={inputCls} value={v.currency || 'USD'} onChange={set('currency')} data-testid="invoice-currency"><option value="USD">USD</option><option value="AED">AED</option></select>
+            </label>
+          )}
           <label className={labelCls}>Invoice date<input required type="date" className={inputCls} value={v.invoice_date} onChange={set('invoice_date')} /></label>
           <label className={labelCls}>Due date (optional)<input type="date" className={inputCls} value={v.due_date} onChange={set('due_date')} /></label>
           <label className={labelCls}>For company (optional tag)
@@ -325,8 +330,8 @@ export default function GroupInvoicesView({ options, onWalletsChanged, entityId 
       {!d ? <Skeleton className="h-40" /> : (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-tertiary-100 bg-white p-3"><p className="text-xs text-tertiary-500">Billed (not cancelled)</p><p className="font-heading text-lg font-semibold">{formatMoney(d.totals.INR, 'INR')} · {formatMoney(d.totals.USD, 'USD')}</p></div>
-            <div className="rounded-2xl border border-tertiary-100 bg-white p-3"><p className="text-xs text-tertiary-500">Still to receive</p><p className="font-heading text-lg font-semibold">{formatMoney(d.outstanding.INR, 'INR')} · {formatMoney(d.outstanding.USD, 'USD')}</p></div>
+            <div className="rounded-2xl border border-tertiary-100 bg-white p-3"><p className="text-xs text-tertiary-500">Billed (not cancelled)</p><p className="font-heading text-lg font-semibold">{formatMoney(d.totals.INR, 'INR')} · {formatMoney(d.totals.USD, 'USD')}{Number(d.totals.AED || 0) !== 0 && ` · ${formatMoney(d.totals.AED, 'AED')}`}</p></div>
+            <div className="rounded-2xl border border-tertiary-100 bg-white p-3"><p className="text-xs text-tertiary-500">Still to receive</p><p className="font-heading text-lg font-semibold">{formatMoney(d.outstanding.INR, 'INR')} · {formatMoney(d.outstanding.USD, 'USD')}{Number(d.outstanding.AED || 0) !== 0 && ` · ${formatMoney(d.outstanding.AED, 'AED')}`}</p></div>
           </div>
           {!d.rows.length ? <EmptyState icon={FileText} title="No invoices yet" description="Issue an invoice from a legal entity; payments you record go straight into its wallet." /> : (
             <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white">

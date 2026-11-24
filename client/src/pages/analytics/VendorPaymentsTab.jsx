@@ -30,7 +30,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
   const { pushError, pushSuccess } = useAlerts();
   const [preview, setPreview] = useState(null);
-  const [form, setForm] = useState({ invoice_number: '', invoice_date: today(), notes: '' });
+  const [form, setForm] = useState({ invoice_number: '', invoice_date: today(), due_date: '', notes: '' });
   const [billTo, setBillTo] = useState(null);
   const [amounts, setAmounts] = useState({});
   const [error, setError] = useState('');
@@ -48,7 +48,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
         setPreview(data.data);
         setAmounts(Object.fromEntries((data.data.projects || []).map((p) => [`${p.project.id}|${p.currency}`, String(p.amount)])));
         setBillTo({ ...data.data.bill_to, save: true });
-        setForm({ invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || today(), notes: '' });
+        setForm({ invoice_number: data.data.suggested_number || '', invoice_date: data.data.existing?.invoice_date || today(), due_date: '', notes: '' });
       })
       .catch((err) => { if (alive) setError(apiErrorMessage(err, 'Nothing to invoice for this vendor')); });
     return () => { alive = false; };
@@ -61,7 +61,7 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, notes: form.notes.trim() || null, amounts: (preview?.projects || []).map((p) => ({ project_id: p.project.id, currency: p.currency, amount: Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) })), ...billToPayload(billTo) });
+      await apiClient.post('/billing/vendor-invoices/generate', { vendor_account_id: target.vendor.id, period_month: target.period_month, period_year: target.period_year, invoice_number: form.invoice_number.trim(), invoice_date: form.invoice_date, due_date: form.due_date || null, notes: form.notes.trim() || null, amounts: (preview?.projects || []).map((p) => ({ project_id: p.project.id, currency: p.currency, amount: Number(amounts[`${p.project.id}|${p.currency}`] ?? p.amount) })), ...billToPayload(billTo) });
       pushSuccess?.(`Vendor invoice ${form.invoice_number} generated`);
       onGenerated?.();
       onClose();
@@ -96,6 +96,10 @@ function VendorInvoiceDrawer({ target, onClose, onGenerated }) {
           <label className="block text-xs font-medium text-tertiary-600">
             Invoice date
             <input required type="date" value={form.invoice_date} onChange={(e) => set('invoice_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-xs font-medium text-tertiary-600">
+            Due date (when the vendor has to be paid; optional)
+            <input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" data-testid="vendor-invoice-due-date" />
           </label>
           {billTo && <BillToFields value={billTo} onChange={setBillTo} partyLabel="vendor" />}
           <label className="block text-xs font-medium text-tertiary-600 sm:col-span-2">

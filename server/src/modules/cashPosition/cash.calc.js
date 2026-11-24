@@ -7,7 +7,8 @@ const D = (v) => new Prisma.Decimal(v === null || v === undefined || v === '' ? 
 const ZERO = D(0);
 const money = (d) => D(d).toFixed(2);
 
-const CURRENCIES = ['INR', 'USD'];
+// The currencies bank accounts and wallets can hold (never added together). AED is for export invoices billed in dirhams.
+const CURRENCIES = ['INR', 'USD', 'AED'];
 const ACCOUNT_TYPES = ['current', 'savings', 'cash'];
 const PURPOSES = ['general', 'salary', 'travel', 'unallocated'];
 const MODES = ['cash', 'upi', 'cheque', 'neft', 'rtgs', 'imps', 'swift', 'other'];
@@ -60,11 +61,14 @@ function modeBreakdown(rows) {
   return Object.fromEntries(Object.entries(out).map(([mode, v]) => [mode, { in: money(v.in), out: money(v.out), count: v.count }]));
 }
 
-/** Totals per currency, never mixed: { INR: '0.00', USD: '0.00' }. */
+/** Totals per currency, never mixed: { INR: '0.00', USD: '0.00', AED: '0.00' }. */
 function totalsByCurrency(items, amountOf) {
-  const totals = { INR: ZERO, USD: ZERO };
-  for (const item of items) totals[item.currency] = totals[item.currency].plus(D(amountOf(item)));
-  return { INR: money(totals.INR), USD: money(totals.USD) };
+  const totals = Object.fromEntries(CURRENCIES.map((c) => [c, ZERO]));
+  for (const item of items) {
+    if (!totals[item.currency]) totals[item.currency] = ZERO;
+    totals[item.currency] = totals[item.currency].plus(D(amountOf(item)));
+  }
+  return Object.fromEntries(Object.entries(totals).map(([c, v]) => [c, money(v)]));
 }
 
 module.exports = { D, ZERO, money, sum, CURRENCIES, ACCOUNT_TYPES, PURPOSES, MODES, signed, walletBalance, ownerKey, transferKind, isIntercompany, openingGap, withRunningBalance, modeBreakdown, totalsByCurrency };

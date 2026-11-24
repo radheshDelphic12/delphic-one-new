@@ -2,7 +2,7 @@ const { z } = require('zod');
 const prisma = require('../../config/db');
 
 // Payment collection for unpaid invoices: a due date, the next follow-up date and a log of every chase with its note.
-// Works for client invoices (Finance > Invoicing, scoped by workspace) and group invoices (Book Keeping, scoped by holding group).
+// Works for client invoices (Finance > Invoicing, scoped by workspace), vendor invoices (Finance > Vendor Invoices, scoped by workspace) and group invoices (Book Keeping, scoped by holding group).
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-12-31');
 const nullableDate = z.preprocess((v) => (v === '' ? null : v), dateStr.nullable().optional());
@@ -21,6 +21,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 /** Which invoice table and which scope a kind belongs to. */
 function target(kind, scope) {
   if (kind === 'client_invoice') return { model: prisma.clientInvoice, where: { org_id: scope.orgId }, owner: { org_id: scope.orgId } };
+  if (kind === 'vendor_invoice') return { model: prisma.projectVendorInvoice, where: { org_id: scope.orgId }, owner: { org_id: scope.orgId } };
   if (kind === 'dox_invoice') return { model: prisma.doxInvoice, where: { org_id: scope.orgId }, owner: { org_id: scope.orgId } };
   return { model: prisma.groupInvoice, where: { org_group_id: { in: scope.groupIds } }, owner: {} };
 }

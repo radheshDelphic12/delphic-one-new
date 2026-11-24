@@ -45,9 +45,9 @@ const ERRORS = {
   entity_state_required: [422, "Add the legal entity's GST state code first (Setup > Legal entities)"],
   place_of_supply_required: [422, "Enter the buyer's state code (place of supply)"],
   hsn_required: [422, 'Every line of a GST invoice needs an HSN / SAC code'],
-  bank_details_required: [422, 'A USD export invoice needs bank and SWIFT details (on the bank account or on the invoice)'],
+  bank_details_required: [422, 'An export invoice needs bank and SWIFT details (on the bank account or on the invoice)'],
   wallet_not_in_entity: [422, "The receiving wallet must be in one of this legal entity's bank accounts"],
-  wallet_currency: [422, 'The receiving wallet is not in the currency of this invoice (GST and non-GST: INR, export: USD)'],
+  wallet_currency: [422, 'The receiving wallet is not in the currency of this invoice (GST and non-GST: INR, export: USD or AED, as chosen on the invoice)'],
   already_cancelled: [409, 'This invoice is already cancelled'],
   has_payments: [409, 'Remove the payments first, then cancel the invoice'],
   cancelled: [409, 'A cancelled invoice takes no payments'],
@@ -58,7 +58,7 @@ const ERRORS = {
   has_payments_locked:[409, 'Payments are recorded on this invoice: its currency and receiving wallet cannot change'],
   total_below_paid: [422, 'The new total is less than what has already been received on this invoice'],
   overpayment: [422, 'That is more than what is still due on this invoice'],
-  currency_required: [422, 'This holds both INR and USD wallets: choose a currency'],
+  currency_required: [422, 'This holds wallets in more than one currency: choose a currency'],
 };
 const result = (res, r, status = 200) => {
   if (r.error) { const m = ERRORS[r.error] || [400, 'Bad request']; return fail(res, m[0], m[1]); }

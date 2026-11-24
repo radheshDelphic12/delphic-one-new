@@ -87,7 +87,7 @@ describe('group cash: legal entities, accounts, wallets', () => {
     expect((await post('/entities', { name: 'Elsewhere', workspace_id: '11111111-1111-4111-8111-111111111111' })).status).toBe(422);
   });
 
-  test('legal entity, bank account and wallet are all optional and independent; cash accounts have no bank details; only INR and USD', async () => {
+  test('legal entity, bank account and wallet are all optional and independent; cash accounts have no bank details; only INR, USD and AED', async () => {
     const e = await entity();
     const { account: acc } = await account(e.id, { bare: true });
     // no wallet appears by itself
@@ -102,7 +102,7 @@ describe('group cash: legal entities, accounts, wallets', () => {
     const cash = (await account(e.id, { name: 'Cash in hand', type: 'cash', bank_name: 'HDFC', account_last4: '9999' })).account;
     expect(cash.bank_name).toBeNull();
     expect(cash.account_last4).toBeNull();
-    expect((await post('/accounts', { legal_entity_id: e.id, name: 'Dirham', type: 'current', currency: 'AED', opening_date: '2026-04-01' })).status).toBe(422);
+    expect((await post('/accounts', { legal_entity_id: e.id, name: 'Euro', type: 'current', currency: 'EUR', opening_date: '2026-04-01' })).status).toBe(422);
     expect((await post('/accounts', { legal_entity_id: e.id, name: 'Odd', type: 'wallet', currency: 'INR', opening_date: '2026-04-01' })).status).toBe(422);
     expect(acc.id).toBeTruthy();
   });
@@ -154,7 +154,7 @@ describe('group cash: transactions', () => {
     expect(await balanceOf(w.id)).toBe('-50.25');
     const pos = data(await get('/position'));
     expect(pos.entities[0].accounts[0].balance).toBe('49.75'); // 100 (Unallocated) - 50.25
-    expect(pos.totals).toEqual({ INR: '49.75', USD: '0.00' });
+    expect(pos.totals).toEqual({ INR: '49.75', USD: '0.00', AED: '0.00' });
     expect((await tx(w.id, { amount: '0' })).status).toBe(422);
     expect((await tx(w.id, { amount: '10.123' })).status).toBe(422);
     expect((await tx(w.id, { amount: '-5' })).status).toBe(422);
@@ -303,13 +303,13 @@ describe('group cash: the Cash Position views, reports and reconciliation', () =
     await wallet(usd.id, { owner_org_id: b.id, name: 'GI USD' });
     await tx(w1.id, { amount: '25' });
     const pos = data(await get('/position'));
-    expect(pos.totals).toEqual({ INR: '125.00', USD: '40.00' });
+    expect(pos.totals).toEqual({ INR: '125.00', USD: '40.00', AED: '0.00' });
     const fundNames = pos.funds.map((f) => f.name);
     expect(fundNames).toContain('Gulati Industries');
     expect(fundNames).toContain('Delphic Global (entity)'); // the Unallocated wallets
-    expect(pos.funds.find((f) => f.name === 'Gulati Industries').totals).toEqual({ INR: '25.00', USD: '0.00' });
-    expect(data(await get('/position?currency=USD')).totals).toEqual({ INR: '0.00', USD: '40.00' });
-    expect(data(await get(`/position?workspace_id=${b.id}`)).totals).toEqual({ INR: '25.00', USD: '0.00' });
+    expect(pos.funds.find((f) => f.name === 'Gulati Industries').totals).toEqual({ INR: '25.00', USD: '0.00', AED: '0.00' });
+    expect(data(await get('/position?currency=USD')).totals).toEqual({ INR: '0.00', USD: '40.00', AED: '0.00' });
+    expect(data(await get(`/position?workspace_id=${b.id}`)).totals).toEqual({ INR: '25.00', USD: '0.00', AED: '0.00' });
     expect(data(await get('/position?type=cash')).entities).toHaveLength(0);
     // the account balance is always the whole account, even when only one company's wallet is shown
     const filtered = data(await get(`/position?workspace_id=${b.id}`)).entities[0].accounts.find((x) => x.id === inr.id);

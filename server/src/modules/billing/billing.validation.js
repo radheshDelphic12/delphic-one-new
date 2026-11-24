@@ -188,6 +188,8 @@ const generateVendorInvoiceSchema = vendorInvoicePeriodSchema.extend({
   bill_to: billTo,
   save_to_account: saveToAccount,
   notes: z.string().trim().max(1000).nullable().optional(),
+  // When the vendor has to be paid (optional); a regenerated invoice keeps the due date it already had.
+  due_date: z.preprocess((v) => (v === '' ? null : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-12-31').nullable().optional()),
   // Optional per-project amount typed over the calculated figure (audited via details.manual_override).
   amounts: z.array(z.object({ project_id: z.string().uuid(), currency: CURRENCY, amount: z.coerce.number().positive().max(1e12) })).max(200).optional(),
 });

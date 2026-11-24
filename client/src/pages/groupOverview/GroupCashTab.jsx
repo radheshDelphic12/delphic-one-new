@@ -38,7 +38,7 @@ const Money = ({ value, currency, className = '' }) => (
   <span className={`tabular-nums ${String(value).startsWith('-') ? 'text-danger-600' : ''} ${className}`}>{formatMoney(value, currency)}</span>
 );
 const Totals = ({ totals }) => (
-  <span className="inline-flex flex-wrap gap-x-3 tabular-nums"><Money value={totals.INR} currency="INR" /><Money value={totals.USD} currency="USD" /></span>
+  <span className="inline-flex flex-wrap gap-x-3 tabular-nums"><Money value={totals.INR} currency="INR" /><Money value={totals.USD} currency="USD" />{Number(totals.AED || 0) !== 0 && <Money value={totals.AED} currency="AED" />}</span>
 );
 
 /** Shows what the server warned about (negative balance, opening balances that do not add up) after a save. */
@@ -699,7 +699,7 @@ function SetupView({ options, position, onChanged }) {
           <label className={labelCls}>Name<input required className={inputCls} value={account.name} onChange={(e) => setAccount((c) => ({ ...c, name: e.target.value }))} placeholder="e.g. HDFC Current" /></label>
           <div className="grid grid-cols-2 gap-2">
             <label className={labelCls}>Type<select className={inputCls} value={account.type} onChange={(e) => setAccount((c) => ({ ...c, type: e.target.value }))}>{Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-            <label className={labelCls}>Currency<select className={inputCls} value={account.currency} onChange={(e) => setAccount((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option></select></label>
+            <label className={labelCls}>Currency<select className={inputCls} value={account.currency} onChange={(e) => setAccount((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option><option>AED</option></select></label>
           </div>
           {account.type !== 'cash' && <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Bank<input className={inputCls} value={account.bank_name} onChange={(e) => setAccount((c) => ({ ...c, bank_name: e.target.value }))} /></label><label className={labelCls}>Last 4 digits<input className={inputCls} maxLength={4} value={account.account_last4} onChange={(e) => setAccount((c) => ({ ...c, account_last4: e.target.value }))} /></label></div>}
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={account.declared_opening_balance} onChange={(e) => setAccount((c) => ({ ...c, declared_opening_balance: e.target.value }))} /></label><label className={labelCls}>As on<input type="date" className={inputCls} value={account.opening_date} onChange={(e) => setAccount((c) => ({ ...c, opening_date: e.target.value }))} /></label></div>
@@ -713,7 +713,7 @@ function SetupView({ options, position, onChanged }) {
         }}>
           <h3 className="font-heading font-semibold text-tertiary-900">New wallet</h3>
           <label className={labelCls}>Bank account (optional, you can map it later)<select className={inputCls} value={wallet.bank_account_id} onChange={(e) => setWallet((c) => ({ ...c, bank_account_id: e.target.value }))}><option value="">Not mapped</option>{(options?.accounts || []).map((a) => <option key={a.id} value={a.id}>{accountLabel.get(a.id) || a.name} ({a.currency})</option>)}</select></label>
-          {!wallet.bank_account_id && <label className={labelCls}>Currency<select className={inputCls} value={wallet.currency} onChange={(e) => setWallet((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option></select></label>}
+          {!wallet.bank_account_id && <label className={labelCls}>Currency<select className={inputCls} value={wallet.currency} onChange={(e) => setWallet((c) => ({ ...c, currency: e.target.value }))}><option>INR</option><option>USD</option><option>AED</option></select></label>}
           <label className={labelCls}>Whose money (optional)<select className={inputCls} value={wallet.owner} onChange={(e) => setWallet((c) => ({ ...c, owner: e.target.value }))}><option value="">No owner</option>{(options?.workspaces || []).map((w) => <option key={w.id} value={`org:${w.id}`}>{w.name}</option>)}{(options?.entities || []).map((x) => <option key={x.id} value={`entity:${x.id}`}>{x.name} (entity)</option>)}</select></label>
           <div className="grid grid-cols-2 gap-2"><label className={labelCls}>Purpose<select className={inputCls} value={wallet.purpose} onChange={(e) => setWallet((c) => ({ ...c, purpose: e.target.value }))}><option value="general">General</option><option value="salary">Salary</option><option value="travel">Travel</option></select></label><label className={labelCls}>Opening balance<input inputMode="decimal" className={inputCls} value={wallet.opening_balance} onChange={(e) => setWallet((c) => ({ ...c, opening_balance: e.target.value }))} /></label></div>
           <label className={labelCls}>Name<input required className={inputCls} value={wallet.name} onChange={(e) => setWallet((c) => ({ ...c, name: e.target.value }))} placeholder="e.g. Zephyr salary" /></label>
@@ -816,7 +816,7 @@ function CashView({ filters, selected, toggle, setOpenWallet, setOpenAccount }) 
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        {[['Cash in hand, INR', p.totals.INR, 'INR'], ['Cash in hand, USD', p.totals.USD, 'USD']].map(([l, x, c]) => (
+        {[['Cash in hand, INR', p.totals.INR, 'INR'], ['Cash in hand, USD', p.totals.USD, 'USD'], ['Cash in hand, AED', p.totals.AED, 'AED']].filter(([, x, c]) => c !== 'AED' || Number(x || 0) !== 0).map(([l, x, c]) => (
           <div key={l} className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card" data-testid="cash-total"><p className="text-xs text-tertiary-500">{l}</p><p className="font-heading text-xl font-semibold"><Money value={x} currency={c} /></p></div>
         ))}
         <div className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card"><p className="text-xs text-tertiary-500">Cash accounts</p><p className="font-heading text-xl font-semibold">{accounts.length}</p></div>
@@ -875,7 +875,7 @@ export default function GroupCashTab() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-heading text-lg font-semibold text-tertiary-900">Group Book Keeping</h2>
-          <p className="text-xs text-tertiary-500">Balances are worked out from the entries; INR and USD are never added together.</p>
+          <p className="text-xs text-tertiary-500">Balances are worked out from the entries; INR, USD and AED are never added together.</p>
         </div>
         <div className="flex gap-2">
           <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => setTransferOpen(true)}><ArrowLeftRight className="h-4 w-4" />Transfer</button>
@@ -884,7 +884,7 @@ export default function GroupCashTab() {
       </div>
       {p && (
         <div className="grid gap-3 sm:grid-cols-3">
-          {[['Total INR', p.totals.INR, 'INR'], ['Total USD', p.totals.USD, 'USD']].map(([l, x, c]) => (
+          {[['Total INR', p.totals.INR, 'INR'], ['Total USD', p.totals.USD, 'USD'], ['Total AED', p.totals.AED, 'AED']].filter(([, x, c]) => c !== 'AED' || Number(x || 0) !== 0).map(([l, x, c]) => (
             <div key={l} className="rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card"><p className="text-xs text-tertiary-500">{l}</p><p className="font-heading text-xl font-semibold"><Money value={x} currency={c} /></p></div>
           ))}
           <div className="rounded-2xl border border-primary-100 bg-primary-50/40 p-3" data-testid="selected-total">

@@ -653,6 +653,47 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await api('get', `/invoices/${inv.id}`)).status).toBe(200); // still there
   });
 
+  test('vendor invoice: due date, next follow-up and follow-up notes work like a client invoice, and survive a regenerate', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    const generate = (extra = {}) => api('post', '/vendor-invoices/generate').send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'VND-1', ...extra });
+    const first = (await generate({ due_date: '2026-09-10' })).body.data[0];
+    const listed = async () => (await api('get', '/vendor-invoices').query(AUG)).body.data.find((r) => r.id === first.id || r.invoice_number === 'VND-1');
+
+    // due date given at generation; unpaid and past its due date = overdue (the deadline is long gone)
+    let row = await listed();
+    expect(row).toMatchObject({ due_date: '2026-09-10', overdue: true, followup_count: 0, followup_due: false });
+    expect(row.days_overdue).toBeGreaterThan(0);
+
+    // change the due date, add a follow-up that sets the next follow-up date, read the log
+    expect((await api('patch', `/vendor-invoices/${row.id}/collection`).send({ due_date: '2099-01-01' })).status).toBe(200);
+    expect((await api('patch', `/vendor-invoices/${row.id}/collection`).send({})).status).toBe(422); // nothing to change
+    expect((await api('post', `/vendor-invoices/${row.id}/followups`).send({ note: '' })).status).toBe(422); // a note is needed
+    const chase = await api('post', `/vendor-invoices/${row.id}/followups`).send({ note: 'Vendor asked for 10 more days', next_followup_date: '2020-01-02' });
+    expect(chase.status).toBe(201);
+    const log = (await api('get', `/vendor-invoices/${row.id}/followups`)).body.data;
+    expect(log.followups).toHaveLength(1);
+    expect(log.terms).toMatchObject({ due_date: '2099-01-01', next_followup_date: '2020-01-02' });
+    row = await listed();
+    expect(row).toMatchObject({ due_date: '2099-01-01', overdue: false, followup_count: 1, last_followup_note: 'Vendor asked for 10 more days', followup_due: true });
+
+    // only an admin of the same company can touch it
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).patch(`/api/v1/billing/vendor-invoices/${row.id}/collection`), (await loginAs(emp)).access_token).send({ due_date: '2030-01-01' })).status).toBeGreaterThanOrEqual(401);
+    expect((await api('get', '/vendor-invoices/00000000-0000-4000-8000-000000000000/followups')).status).toBe(404);
+
+    // generating the month again replaces the invoice but keeps its due date, next follow-up and notes
+    await generate();
+    row = await listed();
+    expect(row).toMatchObject({ due_date: '2099-01-01', next_followup_date: '2020-01-02', followup_count: 1 });
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

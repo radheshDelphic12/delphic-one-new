@@ -60,7 +60,7 @@ async function linkTargetExists(groupId, id) {
 /** Checks a body against the legal entity and works the totals out. Shared by issuing an invoice and by editing one. */
 async function build(entity, body, issuedSeller = null) {
   if (body.workspace_id && !(await prisma.org.findFirst({ where: { id: body.workspace_id, org_group_id: entity.org_group_id }, select: { id: true } }))) return { error: 'workspace_not_found' };
-  const currency = body.type === 'usd_export' ? 'USD' : 'INR';
+  const currency = body.type === 'usd_export' ? body.currency || 'USD' : 'INR';
   const wallet = await prisma.wallet.findFirst({ where: {
       id: body.receiving_wallet_id,
       org_group_id: entity.org_group_id,
