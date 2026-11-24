@@ -65,17 +65,23 @@ describe('what is on file', () => {
 
   test('clients: an agreement uploaded on a project of the client (by account link, or by name on an older project) counts as on file, and says which project', async () => {
     const byLink = await account('client', 'Echo Corp');
-    const byName = await account('client', 'Foxtrot Ltd');
+    await account('client', 'Foxtrot Ltd');
     const bare = await account('client', 'Golf Inc');
     const p1 = await account('client', 'Echo build', { is_project: true, client_account_id: byLink.id, project_name: 'Echo build' });
     const p2 = await account('client', 'Foxtrot old', { is_project: true, client_name: 'Foxtrot Ltd', project_name: 'Foxtrot old' });
     await doc('account', p1.id, 'Client Agreement');
     await account('client', 'Golf site', { is_project: true, client_account_id: bare.id, client_agreement_url: 'https://drive.example/golf' });
     await doc('account', p2.id, 'Client Agreement', { doc_type: 'Agreement' });
+    // an older project (not flagged is_project, but it has billing rates, so Finance lists it) pointing at its client
+    const hotel = await account('client', 'Hotel Group');
+    const legacy = await account('client', 'FindQ', { client_account_id: hotel.id, project_name: 'Dish Network' });
+    await prisma.billingRate.create({ data: { org_id: org.id, account_id: legacy.id, rate_type: 'monthly', rate: 1000, effective_from: new Date('2026-01-01'), created_by: admin.id } });
+    await doc('account', legacy.id, 'Client Agreement');
     const o = (await get('/overview', { kind: 'client' })).body.data;
     const by = Object.fromEntries(o.rows.map((r) => [r.name, r]));
     expect(by['Echo Corp'].items[0]).toMatchObject({ state: 'uploaded', document: { via_project: 'Echo build' } });
     expect(by['Foxtrot Ltd'].items[0]).toMatchObject({ state: 'uploaded', document: { via_project: 'Foxtrot old' } });
+    expect(by['Hotel Group'].items[0]).toMatchObject({ state: 'uploaded', document: { via_project: 'Dish Network' } });
     expect(by['Golf Inc'].items[0]).toMatchObject({ state: 'uploaded', document: { via_project: 'Golf site' } });
     expect(o.rows.map((r) => r.name)).not.toContain('Echo build'); // a project is never listed as a client
     expect(o.summary.missing_items).toBe(0);

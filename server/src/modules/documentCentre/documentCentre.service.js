@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { z } = require('zod');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const prisma = require('../../config/db');
+const { projectListWhere } = require('../../lib/projectScope');
 const env = require('../../config/env');
 const storage = require('../storage/storage.service');
 
@@ -143,14 +144,16 @@ async function overview(orgId, query) {
   // A project points to its client by account, or (older projects) only by the client's name.
   const projectLink = new Map(); // client id -> agreement link of one of its projects
   if (kind === 'client' && ids.length) {
+    // the same rule Finance > Projects uses: flagged projects and older ones that predate the flag (they have billing rates, timesheets ...)
     const projects = await prisma.account.findMany({
-      where: { org_id: orgId, is_project: true },
+      where: projectListWhere(orgId),
       select: { id: true, name: true, project_name: true, client_name: true, client_account_id: true, client_agreement_url: true },
     });
     const clientByName = new Map(entities.map((e) => [norm(e.name), e.id]));
     const owner = new Map(); // project id -> client id
     for (const pr of projects) {
-      const clientId = pr.client_account_id && ids.includes(pr.client_account_id) ? pr.client_account_id : (!pr.client_account_id && pr.client_name ? clientByName.get(norm(pr.client_name)) : null);
+      let clientId = pr.client_account_id && ids.includes(pr.client_account_id) ? pr.client_account_id : (!pr.client_account_id && pr.client_name ? clientByName.get(norm(pr.client_name)) : null);
+      if (clientId === pr.id) clientId = null; // a client that is its own project already shows its own files
       if (clientId) owner.set(pr.id, { clientId, label: pr.project_name || pr.name, link: pr.client_agreement_url });
     }
     if (owner.size) {
