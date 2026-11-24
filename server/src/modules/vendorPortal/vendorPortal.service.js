@@ -88,7 +88,7 @@ const submissionSchema = z.object({
   phone: strOpt(30), current_company: strOpt(120), current_location: strOpt(120),
   total_experience_years: z.preprocess((v) => Number(v), z.number().min(0, 'Enter the total experience').max(60)),
   relevant_experience_years: decimalOpt,
-  skills: z.preprocess((v) => (Array.isArray(v) ? v : String(v || '').split(',')), z.array(z.string().trim().min(1).max(60)).max(40)),
+  skills: z.preprocess((v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean), z.array(z.string().max(60)).max(40)),
   current_ctc: decimalOpt, expected_ctc: decimalOpt, notice_period_days: intOpt, vendor_rate: decimalOpt,
   vendor_rate_currency: z.enum(['INR', 'USD', 'AED', 'EUR', 'GBP']).default('INR'),
   linkedin_url: strOpt(300), cv_url: strOpt(500), notes: strOpt(2000),

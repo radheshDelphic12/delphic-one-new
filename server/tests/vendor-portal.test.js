@@ -86,6 +86,14 @@ describe('candidates', () => {
     expect(await prisma.profile.count({ where: { email: 'cara@mail.test' } })).toBe(0);
     expect((await ppost('/submissions').send(candidate())).status).toBe(409);
   });
+  test('skills are optional: a blank or comma-only skills box is accepted', async () => {
+    await share();
+    const r = await ppost('/submissions').field('requirement_id', requirement.id).field('candidate_name', 'No Skills').field('total_experience_years', '2').field('cv_url', 'https://drive.test/cv2').field('skills', ' , ');
+    expect(r.status).toBe(201);
+    expect(r.body.data.skills).toEqual([]);
+    const r2 = await ppost('/submissions').send(candidate({ candidate_name: 'Absent Skills', email: 'abs@mail.test', skills: undefined }));
+    expect(r2.status).toBe(201);
+  });
   test('a CV file can be attached', async () => {
     await share();
     const r = await ppost('/submissions').field('requirement_id', requirement.id).field('candidate_name', 'Fay File').field('total_experience_years', '3').field('skills', 'Go')
