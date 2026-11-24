@@ -67,6 +67,7 @@ export default function AiInterviewPage() {
   const [stalled, setStalled] = useState(false); // the first recording chunk has not reached the server for a while
   const recRef = useRef(null); // speech recognition
   const baseTextRef = useRef('');
+  const networkRetriesRef = useRef(0);
   const wantListenRef = useRef(false); // the candidate pressed "Speak" and has not pressed "Stop" yet
   const [speechNote, setSpeechNote] = useState('');
   const recorderRef = useRef(null);
@@ -457,7 +458,7 @@ export default function AiInterviewPage() {
     'not-allowed': 'The browser is not allowing the microphone for speech. Allow it (the lock icon in the address bar) and press Speak again.',
     'service-not-allowed': 'Speech to text is blocked on this browser. Please open the interview in a recent Chrome or Edge.',
     'audio-capture': 'No microphone was found for speech. Connect one and press Speak again.',
-    network: 'Speech to text needs a working internet connection and could not reach its service. Check your connection and press Speak again.',
+    network: 'Speech to text could not reach the browser\'s speech service (this is not about the interview site itself). Please: use Google Chrome or Microsoft Edge (not Brave or Firefox), switch off any VPN, ad blocker or privacy extension, and if you are on an office or college network, try your phone hotspot. Then press Speak again.',
     'language-not-supported': 'Speech to text does not support this language here. Please use a recent Chrome or Edge.',
   };
 
@@ -483,6 +484,7 @@ export default function AiInterviewPage() {
         const part = e.results[i][0].transcript;
         spoken += spoken && !/\s$/.test(spoken) && !/^\s/.test(part) ? ` ${part}` : part;
       }
+      networkRetriesRef.current = 0; // speech is flowing again
       const next = baseTextRef.current + spoken;
       liveTextRef.current = next;
       setText(next);
@@ -491,6 +493,11 @@ export default function AiInterviewPage() {
     rec.onerror = (e) => {
       const code = e?.error;
       if (code === 'no-speech' || code === 'aborted') return; // a pause; onend restarts it
+      // 'network' is often a blip reaching the browser's speech service: retry quietly a few times before telling the candidate
+      if (code === 'network' && wantListenRef.current && networkRetriesRef.current < 3) {
+        networkRetriesRef.current += 1;
+        return; // onend fires next and restarts listening, keeping what was said so far
+      }
       wantListenRef.current = false;
       setListening(false);
       setSpeechNote(SPEECH_PROBLEMS[code] || 'Speech to text stopped working. Press Speak again.');
@@ -528,6 +535,7 @@ export default function AiInterviewPage() {
   function toggleListening() {
     if (listening) { stopListening(); return; }
     setSpeechNote('');
+    networkRetriesRef.current = 0;
     baseTextRef.current = text ? `${text.trim()} ` : '';
     wantListenRef.current = true;
     try {
