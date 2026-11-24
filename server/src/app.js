@@ -203,6 +203,10 @@ app.use('/api/v1/group-companies', groupCompaniesRoutes);
 app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/storage', storageRoutes);
 app.use('/api/v1/letters', lettersRoutes);
+app.use('/api/v1/document-centre', require('./modules/documentCentre/documentCentre.routes'));
+const vendorPortal = require('./modules/vendorPortal/vendorPortal.routes');
+app.use('/api/v1/vendor-portal', vendorPortal.portal);
+app.use('/api/v1/vendor-portal-admin', vendorPortal.admin);
 app.use('/api/v1/delphic-one', delphicOneRoutes);
 // SaaS platform administration: its own gate (the platform-admin list), not the company roles
 app.use('/api/v1/platform', platformRoutes);

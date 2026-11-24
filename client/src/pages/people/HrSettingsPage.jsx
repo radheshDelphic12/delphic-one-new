@@ -142,17 +142,17 @@ function TeamDrawer({ open, team, onClose, onSubmit }) {
 // location" is exclusive: ticking it moves the default here.
 function LocationDrawer({ open, location = null, onClose, onSubmit }) {
   const isEditing = Boolean(location);
-  const [fields, setFields] = useState({ name: '', city: '', country: '', address: '', is_default: false });
+  const [fields, setFields] = useState({ name: '', city: '', country: '', address: '', legal_name: '', letter_prefix: '', registration_info: '', is_default: false });
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', address: location.address || '', is_default: location.is_default } : { name: '', city: '', country: '', address: '', is_default: false });
+    if (open) setFields(location ? { name: location.name, city: location.city || '', country: location.country || '', address: location.address || '', legal_name: location.legal_name || '', letter_prefix: location.letter_prefix || '', registration_info: location.registration_info || '', is_default: location.is_default } : { name: '', city: '', country: '', address: '', legal_name: '', letter_prefix: '', registration_info: '', is_default: false });
   }, [open, location]);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
   async function submit(event) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), address: fields.address.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
+      await onSubmit({ name: fields.name.trim(), city: fields.city.trim() || (isEditing ? null : undefined), country: fields.country.trim() || (isEditing ? null : undefined), address: fields.address.trim() || (isEditing ? null : undefined), legal_name: fields.legal_name.trim() || (isEditing ? null : undefined), letter_prefix: fields.letter_prefix.trim() || (isEditing ? null : undefined), registration_info: fields.registration_info.trim() || (isEditing ? null : undefined), is_default: fields.is_default });
       onClose();
     } finally { setSaving(false); }
   }
@@ -164,6 +164,13 @@ function LocationDrawer({ open, location = null, onClose, onSubmit }) {
         <label className="block text-xs font-medium text-tertiary-600">City<input value={fields.city} onChange={(event) => set('city', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">Country<input value={fields.country} onChange={(event) => set('country', event.target.value)} className={input} /></label>
         <label className="block text-xs font-medium text-tertiary-600">Complete address<textarea rows={3} maxLength={500} value={fields.address} onChange={(event) => set('address', event.target.value)} placeholder="Building, street, area, city, state, PIN code" className={input} /></label>
+        <fieldset className="space-y-3 rounded-xl border border-primary-100 bg-primary-50/30 p-3" data-testid="letterhead-fields">
+          <legend className="px-1 text-xs font-semibold text-tertiary-700">On letters and documents</legend>
+          <label className="block text-xs font-medium text-tertiary-600">Company name for this office<input value={fields.legal_name} onChange={(event) => set('legal_name', event.target.value)} className={input} placeholder="e.g. Delphic Global Private Limited (India), Delphic Global LLC (Dubai)" maxLength={150} /></label>
+          <label className="block text-xs font-medium text-tertiary-600">Letter number prefix<input value={fields.letter_prefix} onChange={(event) => set('letter_prefix', event.target.value)} className={input} placeholder="e.g. DGPL" maxLength={12} /><span className="mt-0.5 block text-[11px] text-tertiary-500">Used instead of the template prefix in the letter number, e.g. DGPL/Appo/ahmedabad/0001.</span></label>
+          <label className="block text-xs font-medium text-tertiary-600">Registration line (printed at the foot of the page)<input value={fields.registration_info} onChange={(event) => set('registration_info', event.target.value)} className={input} placeholder="e.g. CIN U72900MP2020PTC000000 | GSTIN 23AABCD1234E1Z5" maxLength={300} /></label>
+          <p className="text-[11px] text-tertiary-500">A letter issued for this office shows this name, the office at the top, and every office at the foot of each page. Leave the company name empty to use the company&apos;s own name.</p>
+        </fieldset>
         <label className="flex items-center gap-2 text-sm text-tertiary-700"><input type="checkbox" checked={fields.is_default} onChange={(event) => set('is_default', event.target.checked)} /> Default location <span className="text-xs text-tertiary-400">(only one — replaces the current default)</span></label>
       </form>
     </Drawer>

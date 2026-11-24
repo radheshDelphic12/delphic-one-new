@@ -2,7 +2,7 @@ import HubTabs from '../../components/layout/HubTabs.jsx';
 import HubHeading from '../../components/layout/HubHeading.jsx';
 import { useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
-import { FilePenLine, FileText, Gauge, Laptop, Megaphone, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
+import { FilePenLine, FileText, FolderCheck, Gauge, Laptop, Megaphone, Network, Settings2, UserCog, UsersRound } from 'lucide-react';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
 import PeopleListPage from './PeopleListPage.jsx';
@@ -13,6 +13,7 @@ import AssetsPage from './AssetsPage.jsx';
 import CapacityPage from './CapacityPage.jsx';
 import PoliciesPage from './PoliciesPage.jsx';
 import LettersPage from './LettersPage.jsx';
+import DocumentsPage from '../documents/DocumentsPage.jsx';
 import AnnouncementsCard from '../dashboard/AnnouncementsCard.jsx';
 
 const BASE_TABS = [
@@ -25,6 +26,8 @@ const ADMIN_TABS = [
   { key: 'users', label: 'Users', icon: UserCog, need: 'users.view' },
   { key: 'assets', label: 'Assets', icon: Laptop, need: 'assets.view' },
   { key: 'letters', label: 'Letters', icon: FilePenLine, need: 'letters.view' },
+  // What is on file for clients, vendors and employees (a ? where it is missing), documents to sign, storage.
+  { key: 'documents', label: 'Documents', icon: FolderCheck, need: ['documents.view', 'documents.sign'] },
   { key: 'hr-settings', label: 'HR Settings', icon: Settings2, need: 'hr_settings.view' },
 ];
 
@@ -37,6 +40,7 @@ const TAB_HELP = {
   users: 'Sign-in accounts, roles and access.',
   assets: 'Laptops and other company assets issued to employees.',
   letters: 'Offer, appointment and other HR letters.',
+  documents: 'Agreements and other documents on file for every client, vendor and employee, documents to sign, and storage.',
   'hr-settings': 'Holiday calendars and other HR configuration.',
 };
 const SELF_HEADED = new Set(['policies', 'announcements']);
@@ -84,6 +88,7 @@ export default function PeopleHubPage() {
       {section === 'users' && tabs.some((t) => t.key === 'users') && <UsersPage />}
       {section === 'assets' && tabs.some((t) => t.key === 'assets') && <AssetsPage />}
       {section === 'letters' && tabs.some((t) => t.key === 'letters') && <LettersPage />}
+      {section === 'documents' && tabs.some((t) => t.key === 'documents') && <DocumentsPage />}
       {section === 'hr-settings' && tabs.some((t) => t.key === 'hr-settings') && <HrSettingsPage />}
     </div>
   );

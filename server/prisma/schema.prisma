@@ -682,6 +682,11 @@ model Location {
   country    String?
   address    String?
   is_default Boolean  @default(false)
+  // Company details printed on the letters issued for this office (documents only): the legal entity of this office (for example a Pvt Ltd in
+  // India, an LLC in Dubai), the prefix of its letter serial numbers and a registration line for the foot of the page.
+  legal_name        String?
+  letter_prefix     String?
+  registration_info String?
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
 
@@ -3411,6 +3416,8 @@ model Document {
   uploaded_by      String             @db.Uuid
   uploaded_by_user User               @relation(fields: [uploaded_by], references: [id])
   uploaded_at      DateTime           @default(now())
+  // What kind of document it is, the name of a Document Centre requirement (e.g. "Agreement"); null for older files.
+  doc_type         String?
 
   // Multi-company ERP (Phase 0) — nullable until Phase 1, see Org model comment.
   org_id String? @db.Uuid
@@ -9723,6 +9730,8 @@ model LetterTemplate {
   audience        String    @default("any") // employee | new_joiner | left_employee | vendor | other | any - who it is meant for
   subject         String?
   body            String // plain text with {{field}} placeholders; blank line = new paragraph
+  // The template's own fields, typed by HR when the letter is issued: [{ key, label, hint }]. The built-in fields (company, employee ...) fill themselves.
+  custom_fields   Json      @default("[]")
   signatory_name  String?
   signatory_title String?
   serial_format   String    @default("{PREFIX}/{FY}/{SEQ:4}") // tokens {PREFIX} {YYYY} {YY} {MM} {FY} {SEQ:n}; the counter restarts when the text before the number changes
@@ -9762,6 +9771,9 @@ model Letter {
   recipient_name    String
   recipient_email   String?
   recipient_address String?
+  // The office the letter was issued for and the letterhead details as they were that day: { legal_name, office, registration_info, offices: [...] }
+  location_id       String?   @db.Uuid
+  letterhead        Json?
   fields            Json      @default("{}") // every merge value used, as typed or taken from the record
   subject           String?
   body              String // the final text exactly as issued
@@ -10251,4 +10263,167 @@ model CelebrationWish {
   @@unique([org_membership_id, kind, on_date, from_membership_id], map: "celebration_wishes_once_per_sender")
   @@index([org_id, on_date])
   @@map("celebration_wishes")
+}
+
+// ===================== Vendor portal (a vendor's own sign-in) =====================
+// The vendor side is its OWN data: a portal login, requirements shared with the vendor, the profiles the vendor submits and the invoices
+// the vendor uploads. None of it is a Profile / Submission / Invoice of the company. Only when the company's team approves a vendor
+// submission is a normal Profile created from it (the submission then keeps profile_id); an uploaded invoice stays an upload that the team
+// reads and downloads (it never creates an invoice). Plain id columns, no relations to the core models, on purpose.
+model VendorPortalUser {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  vendor_account_id String    @db.Uuid
+  name              String
+  email             String    @unique
+  password_hash     String
+  active            Boolean   @default(true)
+  last_login_at     DateTime?
+  created_by        String    @db.Uuid
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  @@index([org_id, vendor_account_id])
+  @@map("vendor_portal_users")
+}
+
+// Which vendors may see (and submit profiles to) a requirement: set by the team on the requirement.
+model VendorRequirementShare {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  requirement_id    String   @db.Uuid
+  vendor_account_id String   @db.Uuid
+  shared_by         String   @db.Uuid
+  created_at        DateTime @default(now())
+
+  @@unique([requirement_id, vendor_account_id])
+  @@index([org_id, vendor_account_id])
+  @@map("vendor_requirement_shares")
+}
+
+// A candidate a vendor put forward through the portal. status: pending_review | approved | rejected | withdrawn.
+model VendorSubmission {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                    String    @db.Uuid
+  requirement_id            String    @db.Uuid
+  vendor_account_id         String    @db.Uuid
+  portal_user_id            String    @db.Uuid
+  candidate_name            String
+  email                     String?
+  phone                     String?
+  current_company           String?
+  current_location          String?
+  total_experience_years    Decimal   @db.Decimal(4, 1)
+  relevant_experience_years Decimal?  @db.Decimal(4, 1)
+  skills                    String[]
+  current_ctc               Decimal?  @db.Decimal(14, 2)
+  expected_ctc              Decimal?  @db.Decimal(14, 2)
+  notice_period_days        Int?
+  // what the vendor wants for this person (per month)
+  vendor_rate               Decimal?  @db.Decimal(14, 2)
+  vendor_rate_currency      String    @default("INR")
+  linkedin_url              String?
+  cv_url                    String?
+  cv_file_path              String?
+  cv_file_name              String?
+  notes                     String?
+  status                    String    @default("pending_review")
+  decided_by                String?   @db.Uuid
+  decided_at                DateTime?
+  decision_note             String?
+  // set when the team approved it: the normal Profile created from it
+  profile_id                String?   @db.Uuid
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @default(now()) @updatedAt
+
+  @@index([org_id, status])
+  @@index([vendor_account_id, requirement_id])
+  @@map("vendor_submissions")
+}
+
+// An invoice file a vendor uploaded. status: uploaded | accepted | rejected. Never becomes an invoice by itself.
+model VendorPortalInvoice {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  vendor_account_id String    @db.Uuid
+  portal_user_id    String    @db.Uuid
+  period_month      Int
+  period_year       Int
+  invoice_number    String?
+  invoice_date      DateTime? @db.Date
+  amount            Decimal?  @db.Decimal(14, 2)
+  currency          String    @default("INR")
+  notes             String?
+  file_path         String
+  file_name         String
+  file_size         Int?
+  status            String    @default("uploaded")
+  reviewed_by       String?   @db.Uuid
+  reviewed_at       DateTime?
+  review_note       String?
+  created_at        DateTime  @default(now())
+
+  @@index([org_id, status])
+  @@index([vendor_account_id, period_year, period_month])
+  @@map("vendor_portal_invoices")
+}
+
+// ===================== Document Centre =====================
+// What each client / vendor / employee should have on file (admin-editable list per kind), the signature a person signs with and the
+// documents waiting to be signed. Files live in private folders of the uploads directory and are read only through these routes.
+model DocumentRequirement {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  kind       String // client | vendor | employee
+  name       String
+  sort_order Int      @default(0)
+  active     Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  @@unique([org_id, kind, name])
+  @@map("document_requirements")
+}
+
+model UserSignature {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  user_id    String   @db.Uuid
+  image_path String
+  image_type String   @default("png")
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@unique([org_id, user_id])
+  @@map("user_signatures")
+}
+
+// A PDF someone asked a person to sign. status: pending | signed | declined | cancelled.
+model SignatureRequest {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id               String    @db.Uuid
+  title                String
+  tag_kind             String    @default("other") // client | vendor | employee | invoice | other
+  entity_type          String? // account | org_membership | project_vendor_invoice
+  entity_id            String?   @db.Uuid
+  entity_name          String?
+  doc_type             String?
+  note                 String?
+  original_path        String
+  original_name        String
+  original_size        Int?
+  original_deleted_at  DateTime?
+  status               String    @default("pending")
+  signer_user_id       String    @db.Uuid
+  requested_by         String    @db.Uuid
+  placements           Json?
+  signed_path          String?
+  signed_size          Int?
+  signed_at            DateTime?
+  decline_reason       String?
+  attached_document_id String?   @db.Uuid
+  created_at           DateTime  @default(now())
+
+  @@index([org_id, status])
+  @@index([signer_user_id, status])
+  @@map("signature_requests")
 }

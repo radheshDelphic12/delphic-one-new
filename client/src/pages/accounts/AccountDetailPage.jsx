@@ -18,6 +18,7 @@ import AccountStageOverrideDrawer from './AccountStageOverrideDrawer.jsx';
 import AccountMeetingEditDrawer from './AccountMeetingEditDrawer.jsx';
 import AccountClientMeetings from './AccountClientMeetings.jsx';
 import { accountAccent } from '../../lib/accountAccent.js';
+import { VendorPortalCard } from '../vendorPortal/VendorPortalInternal.jsx';
 import { ACCOUNT_TRANSITIONS, accountKey, apiErrorMessage, canClassifyAccount, canEditAccountDetails, canMutateAccount, formatAccountValue, vendorTypeLabel } from './accountUtils.js';
 import { userCan } from '../../lib/permissions.js';
 
@@ -392,6 +393,8 @@ export default function AccountDetailPage() {
             )}
           </DetailSection>
           )}
+
+          {account.type === 'vendor' && <VendorPortalCard accountId={account.id} />}
 
           <section className="overflow-hidden rounded-xl border border-tertiary-200 bg-white">
             <h2 className="border-b border-tertiary-100 bg-tertiary-50/60 px-3.5 py-2.5 font-heading text-sm font-semibold tracking-tight text-tertiary-900">

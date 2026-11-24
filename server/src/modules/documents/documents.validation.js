@@ -7,6 +7,8 @@ const createMetaSchema = z.object({
   entity_type: z.enum(ALLOWED_ENTITIES),
   entity_id: z.string().uuid(),
   label: z.string().min(1),
+  // what kind of document it is: the name of a Document Centre requirement ("Agreement", "ID proof" ...)
+  doc_type: z.string().trim().max(80).optional(),
 });
 
 const listQuerySchema = z.object({

@@ -1,4 +1,4 @@
-const { app, prisma, request, cleanDatabase, createUser, loginAs, authed, unique } = require('./helpers');
+const { app, prisma, request, cleanDatabase, createUser, createOrgMembership, loginAs, authed, unique } = require('./helpers');
 
 let admin;
 let adminToken;
@@ -103,6 +103,40 @@ describe('project working hours and the day schedule', () => {
     const d = (await get('/reports/day-schedule')).body.data;
     expect(d.projects.find((p) => p.code === 'P0001')).toMatchObject({ name: 'Night desk', start: '21:00', end: '06:00', client: 'Acme' });
     expect(d.shifts).toEqual([expect.objectContaining({ name: 'General', start: '09:00', end: '18:00', people: [expect.objectContaining({ name: admin.name })] })]);
+  });
+
+  test('the report says which projects have no working hours and which employees have no shift', async () => {
+    const client = await mkAccount({ name: 'Acme' });
+    const withHours = await mkAccount({ name: unique('Proj '), is_project: true, client_account_id: client.id, project_code: 'P0020', project_name: 'Has hours' });
+    const noHours = await mkAccount({ name: unique('Proj '), is_project: true, client_account_id: client.id, project_code: 'P0021', project_name: 'No hours' });
+    const half = await mkAccount({ name: unique('Proj '), is_project: true, client_account_id: client.id, project_code: 'P0022', project_name: 'Only a start' });
+    await authed(request(app).patch(`/api/v1/billing/projects/${withHours.id}`), adminToken).send({ work_start_time: '10:00', work_end_time: '19:00' });
+    await authed(request(app).patch(`/api/v1/billing/projects/${half.id}`), adminToken).send({ work_start_time: '10:00' });
+    void noHours;
+
+    // the admin has no shift yet; a second person is on a shift; a contractor (follows the project hours) is not listed
+    const shift = await prisma.shift.create({ data: { org_id: org.id, name: 'General', start_minutes: 540, end_minutes: 1080 } });
+    const onShift = await createUser({ role: 'employee', name: 'Has Shift', withOrg: false });
+    await createOrgMembership(onShift.id, org.id, { role: 'employee' });
+    await prisma.orgMembership.updateMany({ where: { person_id: onShift.id, org_id: org.id }, data: { shift_id: shift.id } });
+    const contractor = await createUser({ role: 'employee', name: 'Contract Dev', withOrg: false });
+    const cm = await createOrgMembership(contractor.id, org.id, { role: 'employee' });
+    await prisma.orgMembership.update({ where: { id: cm.id }, data: { worker_type: 'contractor' } });
+
+    const d = (await get('/reports/day-schedule')).body.data;
+    expect(d.missing.projects.map((p) => p.code).sort()).toEqual(['P0021', 'P0022']);
+    const names = d.missing.employees.map((e) => e.name);
+    expect(names).toContain(admin.name);
+    expect(names).not.toContain('Has Shift');
+    expect(names).not.toContain('Contract Dev');
+    expect(d.missing.projects.find((p) => p.code === 'P0021')).toMatchObject({ name: 'No hours', client: 'Acme' });
+
+    // once the hours and the shift are set, they drop off the list
+    await authed(request(app).patch(`/api/v1/billing/projects/${noHours.id}`), adminToken).send({ work_start_time: '09:00', work_end_time: '18:00' });
+    await prisma.orgMembership.updateMany({ where: { person_id: admin.id, org_id: org.id }, data: { shift_id: shift.id } });
+    const after = (await get('/reports/day-schedule')).body.data;
+    expect(after.missing.projects.map((p) => p.code)).toEqual(['P0022']);
+    expect(after.missing.employees.map((e) => e.name)).not.toContain(admin.name);
   });
 
   test('every project lists the people allocated to it today (open or running allocations; ended or future ones are not)', async () => {

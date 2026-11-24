@@ -6,7 +6,7 @@ const hhmm = (minutes) => `${String(Math.floor(minutes / 60) % 24).padStart(2, '
 
 // The 24-hour day: every running project with its work start / end time and the people allocated to it today, and every shift with the people on it. Reporting only.
 async function daySchedule(orgId) {
-  const [projects, shifts, members] = await Promise.all([
+  const [projects, shifts, members, noShift] = await Promise.all([
     prisma.account.findMany({
       where: projectListWhere(orgId),
       select: { id: true, name: true, project_name: true, project_code: true, client_name: true, client_account: { select: { name: true } }, work_start_time: true, work_end_time: true, contract_status: true },
@@ -16,6 +16,13 @@ async function daySchedule(orgId) {
     prisma.orgMembership.findMany({
       where: { org_id: orgId, shift_id: { not: null }, employment_status: { in: ['active', 'on_leave', 'notice_period'] } },
       select: { shift_id: true, employee_code: true, person: { select: { id: true, name: true } }, team: { select: { name: true } } },
+    }),
+    // working employees with no shift set: their working hours are not in the portal yet (contractors follow their project's hours, so they are not listed)
+    prisma.orgMembership.findMany({
+      where: { org_id: orgId, shift_id: null, worker_type: { not: 'contractor' }, employment_status: { in: ['active', 'on_leave', 'notice_period'] } },
+      select: { id: true, employee_code: true, person: { select: { id: true, name: true } }, team: { select: { name: true } }, department: { select: { name: true } } },
+      orderBy: { person: { name: 'asc' } },
+      take: 1000,
     }),
   ]);
   // who is allocated to each project today (an allocation is a span of days; an open end means still on it), as person ids like the shift lists use
@@ -38,8 +45,7 @@ async function daySchedule(orgId) {
   }
   const people = new Map();
   for (const m of members) people.set(m.shift_id, [...(people.get(m.shift_id) || []), { id: m.person.id, name: m.person.name, employee_code: m.employee_code, team: m.team?.name || null }]);
-  return {
-    projects: projects.map((p) => ({
+  const projectRows = projects.map((p) => ({
       id: p.id,
       name: p.project_name || p.name,
       code: p.project_code,
@@ -48,7 +54,14 @@ async function daySchedule(orgId) {
       end: p.work_end_time,
       on_hold: p.contract_status === 'on_hold',
       allocated: (allocated.get(p.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
-    })),
+    }));
+  return {
+    projects: projectRows,
+    // what is still missing, for the notice at the top of the report: projects with no working hours and employees with no shift
+    missing: {
+      projects: projectRows.filter((p) => !(p.start && p.end)).map((p) => ({ id: p.id, name: p.name, code: p.code, client: p.client, on_hold: p.on_hold })),
+      employees: noShift.map((m) => ({ id: m.person.id, membership_id: m.id, name: m.person.name, employee_code: m.employee_code, team: m.team?.name || null, department: m.department?.name || null })),
+    },
     shifts: shifts.map((s) => ({
       id: s.id,
       name: s.name,

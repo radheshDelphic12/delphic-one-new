@@ -126,6 +126,23 @@ const RULES = [
   // HR letters: templates and the serial number format are Letters > manage; issuing, cancelling and previewing is Letters > create; reading is Letters > view.
   [/^\/letters\/(fields|templates)(\/|$)/, { GET: ['letters.view', 'letters.create'], '*': 'letters.manage' }],
   [/^\/letters(\/|$)/, { GET: 'letters.view', '*': 'letters.create' }],
+
+  // Vendor portal: vendors use their own login (never reaches company auth); the company-side screens use the permissions below.
+  [/^\/vendor-portal(\/|$)/, 'open'],
+  [/^\/vendor-portal-admin\/vendors\/[^/]+\/users$/, 'vendor_portal.manage'],
+  [/^\/vendor-portal-admin\/users\/[^/]+$/, 'vendor_portal.manage'],
+  [/^\/vendor-portal-admin\/vendors(\/|$)/, 'vendor_portal.view'],
+  [/^\/vendor-portal-admin\/requirements\/[^/]+\/vendors$/, { GET: ['vendor_portal.view', 'vendor_portal.share'], '*': 'vendor_portal.share' }],
+  [/^\/vendor-portal-admin\/submissions(\/|$)/, 'open'], // the point of contact of a vendor may decide without the permission; the service limits what is listed
+  [/^\/vendor-portal-admin\/invoices(\/|$)/, { GET: 'vendor_portal.view', '*': 'vendor_portal.manage' }],
+
+  // Document Centre: what is on file for clients, vendors and employees, signing, and storage. Signing is by the signer only (the service checks who).
+  [/^\/document-centre\/signatures\/me(\/|$)/, 'documents.sign'],
+  [/^\/document-centre\/sign-requests\/[^/]+\/(sign|decline)$/, 'documents.sign'],
+  [/^\/document-centre\/sign-requests(\/|$)/, { GET: ['documents.view', 'documents.sign'], '*': 'documents.upload' }],
+  [/^\/document-centre\/signers$/, ['documents.view', 'documents.upload', 'documents.sign']],
+  [/^\/document-centre\/(requirements|cleanup)(\/|$)/, { GET: 'documents.view', '*': 'documents.manage' }],
+  [/^\/document-centre(\/|$)/, 'documents.view'],
   [/^\/payroll\/(payslips\/me|salary-structures\/me)$/, 'basic.payslips'],
   [/^\/payroll\/payslips\/[^/]+$/, 'open'], // the service returns only the caller's own payslip unless they hold payroll.view (see payroll.routes)
   [/^\/payroll\/increment-reminders(\/|$)/, 'increments.receive'],

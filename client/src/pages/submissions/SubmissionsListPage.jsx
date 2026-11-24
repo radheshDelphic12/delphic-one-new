@@ -14,6 +14,7 @@ import { JoiningPendingBadge, PremiumBadge } from '../../components/ui/PremiumBa
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
 import ProgressRing from '../../components/ui/ProgressRing.jsx';
 import { PeekActions, PeekField } from '../../components/ui/PeekFields.jsx';
+import { VendorSubmissionsInbox } from '../vendorPortal/VendorPortalInternal.jsx';
 import SubmissionCreatePage from './SubmissionCreatePage.jsx';
 
 function subKey(id) {
@@ -301,6 +302,7 @@ export default function SubmissionsListPage() {
 
   return (
     <div className="space-y-2">
+      <VendorSubmissionsInbox />
       {canCreateSubmission(user) && (
         <div className="flex justify-end">
           <button type="button" className="btn-primary shrink-0" onClick={() => setCreateOpen(true)}>

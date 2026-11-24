@@ -45,6 +45,7 @@ const InterviewFeedbackPage = lazyPage(() => import('../pages/interviewFeedback/
 const CareerRedirect = lazyPage(() => import('../pages/public/CareerRedirect.jsx'));
 const AssessmentTakePage = lazyPage(() => import('../pages/public/AssessmentTakePage.jsx'));
 const AiInterviewPage = lazyPage(() => import('../pages/public/AiInterviewPage.jsx'));
+const VendorPortalPage = lazyPage(() => import('../pages/vendorPortal/VendorPortalPage.jsx'));
 const HiringSetupPage = lazyPage(() => import('../pages/hiringSetup/HiringSetupPage.jsx'));
 const AnalyticsPage = lazyPage(() => import('../pages/analytics/AnalyticsPage.jsx'));
 const FinancialsPage = lazyPage(() => import('../pages/financials/FinancialsPage.jsx'));
@@ -378,6 +379,7 @@ export default function App() {
     <Suspense fallback={<LoadingScreen />}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/vendor-portal" element={<VendorPortalPage />} />
       <Route path="/guest-access" element={<GuestPortalPage />} />
       <Route path="/guest-project" element={<GuestProjectPage />} />
       <Route path="/assessment/:token" element={<AssessmentTakePage />} />

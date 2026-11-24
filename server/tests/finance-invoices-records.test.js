@@ -694,6 +694,61 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect(row).toMatchObject({ due_date: '2099-01-01', next_followup_date: '2020-01-02', followup_count: 1 });
   });
 
+  test('payment tracker: a contractor client invoice and vendor invoice side by side, with both due dates and the paid / unpaid state of each', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    const tracker = async (extra = {}) => (await api('get', '/payment-tracker').query({ ...AUG, ...extra })).body.data;
+
+    // nothing invoiced yet: the contractor is listed, both sides say "no invoice"
+    let d = await tracker();
+    expect(d.rows).toHaveLength(1);
+    expect(d.rows[0]).toMatchObject({ resource: 'Vendor Dev', vendor: { id: ctx.vendor.id }, client: { state: 'no_invoice' }, vendor_invoice: { state: 'no_invoice' } });
+    expect(d.summary).toMatchObject({ resources: 1, client_paid_vendor_pending: 0 });
+    expect(d.vendors.map((v) => v.id)).toEqual([ctx.vendor.id]);
+    expect(d.clients).toHaveLength(1);
+
+    // both invoices sent, each with its own due date
+    const inv = (await api('post', '/invoices').send({ client_account_id: p.id, ...AUG })).body.data;
+    await api('post', `/invoices/${inv.id}/status`).send({ status: 'sent' });
+    await api('patch', `/invoices/${inv.id}/collection`).send({ due_date: '2026-09-15' });
+    await api('post', '/vendor-invoices/generate').send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'VND-7', due_date: '2026-09-25' });
+    d = await tracker();
+    expect(d.rows[0].client).toMatchObject({ state: 'unpaid', due_date: '2026-09-15', overdue: true });
+    expect(d.rows[0].vendor_invoice).toMatchObject({ state: 'unpaid', invoice_number: 'VND-7', due_date: '2026-09-25', overdue: true });
+    expect(d.summary.client_invoices).toMatchObject({ total: 1, not_received: 1, overdue: 1 });
+    expect(d.summary.vendor_invoices).toMatchObject({ total: 1, unpaid: 1, overdue: 1 });
+
+    // the client pays in full, the vendor is not paid yet: the row to watch
+    expect((await api('post', `/invoices/${inv.id}/payments`).send({ amount: Number(inv.total_amount ?? inv.amount), paid_on: '2026-09-05' })).status).toBeLessThan(300);
+    d = await tracker();
+    expect(d.rows[0].client.state).toBe('paid');
+    expect(d.summary.client_paid_vendor_pending).toBe(1);
+    expect((await tracker({ status: 'client_paid_vendor_pending' })).rows).toHaveLength(1);
+    expect((await tracker({ status: 'client_pending' })).rows).toHaveLength(0);
+    expect((await tracker({ status: 'vendor_pending' })).rows).toHaveLength(1);
+
+    // then the vendor is paid too
+    await prisma.vendorPayment.create({ data: { org_id: ctx.org.id, vendor_name: 'Vendor', vendor_type: 'contractor', vendor_account_id: ctx.vendor.id, amount: 100, currency: 'USD', period_month: AUG.period_month, period_year: AUG.period_year, status: 'paid', created_by: ctx.adminUser.id, paid_at: new Date() } });
+    d = await tracker();
+    expect(d.rows[0].vendor_invoice.state).toBe('paid');
+    expect(d.summary.client_paid_vendor_pending).toBe(0);
+    expect((await tracker({ status: 'vendor_pending' })).rows).toHaveLength(0);
+
+    // client and vendor filters, and another month is empty
+    expect((await tracker({ client_name: 'Nobody Ltd' })).rows).toHaveLength(0);
+    expect((await tracker({ vendor_account_id: ctx.vendor.id })).rows).toHaveLength(1);
+    expect((await tracker({ period_month: 1, period_year: 2020 })).rows).toHaveLength(0);
+    // admins only
+    const emp = await createUser({ role: 'employee' });
+    await createOrgMembership(emp.id, ctx.org.id, { role: 'employee' });
+    expect((await authed(request(app).get('/api/v1/billing/payment-tracker'), (await loginAs(emp)).access_token).query(AUG)).status).toBeGreaterThanOrEqual(401);
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

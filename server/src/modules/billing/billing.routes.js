@@ -873,6 +873,14 @@ router.post(
   })
 );
 
+// Client and vendor payments side by side for a month (contractors only): did the client pay, did we pay the vendor, and both due dates.
+const paymentTracker = require('./paymentTracker.service');
+router.get(
+  '/payment-tracker',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => ok(res, await paymentTracker.paymentTracker(req.user.org_id, paymentTracker.querySchema.parse(req.query))))
+);
+
 // The same collection routes for a vendor invoice: due date, next follow-up date, follow-up log.
 router.patch(
   '/vendor-invoices/:id/collection',

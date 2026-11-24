@@ -6,7 +6,7 @@ const { ok, created, fail } = require('../../utils/response');
 const asyncHandler = require('../../utils/asyncHandler');
 const prisma = require('../../config/db');
 const service = require('./letters.service');
-const { letterPdf } = require('./letters.pdf');
+const { letterPdf, logoFor } = require('./letters.pdf');
 
 // HR letters. Which permission each route needs is in lib/access/routeRules.js (letters.view / letters.create / letters.manage).
 const router = express.Router();
@@ -21,6 +21,7 @@ const ERRORS = {
   not_found: [404, 'Not found'],
   template_not_found: [404, 'That template was not found'],
   template_inactive: [409, 'That template is switched off'],
+  office_not_found: [404, 'That office is not part of this company'],
   recipient_required: [422, 'Choose who the letter is for'],
   recipient_not_found: [404, 'That person or vendor is not part of this company'],
   already_cancelled: [409, 'This letter is already cancelled'],
@@ -77,8 +78,8 @@ router.get('/:id', mayRead, asyncHandler(async (req, res) => {
 router.get('/:id/pdf', mayRead, asyncHandler(async (req, res) => {
   const r = await service.get(req.user.org_id, uuid.parse(req.params.id));
   if (!r) return problem(res, { error: 'not_found' });
-  const org = await prisma.org.findUnique({ where: { id: req.user.org_id }, select: { name: true } });
-  const pdf = await letterPdf(r.raw, { companyName: org?.name || '' });
+  const org = await prisma.org.findUnique({ where: { id: req.user.org_id }, select: { name: true, logo_url: true, is_master_workspace: true } });
+  const pdf = await letterPdf(r.raw, { companyName: org?.name || '', logo: logoFor(org) });
   res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${r.raw.serial_number.replace(/[^A-Za-z0-9._-]+/g, '-')}.pdf"`, 'Cache-Control': 'private, no-store' });
   return res.send(pdf);
 }));

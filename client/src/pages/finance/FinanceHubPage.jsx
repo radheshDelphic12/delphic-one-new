@@ -1,7 +1,7 @@
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Banknote, CalendarRange, CheckCircle2, ClipboardCheck, FileCheck, FileText, FolderKanban, Percent, Receipt, SlidersHorizontal, Tags, Truck, Users2, Wallet } from 'lucide-react';
+import { ArrowLeftRight, Banknote, CalendarRange, CheckCircle2, ClipboardCheck, FileCheck, FileText, FolderKanban, Percent, Receipt, SlidersHorizontal, Tags, Truck, Users2, Wallet } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { allowed, isAdminUser } from '../../lib/access.js';
@@ -11,6 +11,7 @@ import GroupChargesTab from './GroupChargesTab.jsx';
 import MonthProjectsTab from './MonthProjectsTab.jsx';
 import BillingSetupTab from './BillingSetupTab.jsx';
 import VendorInvoicesTab from './VendorInvoicesTab.jsx';
+import PaymentTrackerTab from './PaymentTrackerTab.jsx';
 import InvoicingSection from './InvoicingSection.jsx';
 import TaxInvoicesTab from './TaxInvoicesTab.jsx';
 // Project P&L is hidden for now (client brief 2026-10-01: its cost rules —
@@ -18,10 +19,11 @@ import TaxInvoicesTab from './TaxInvoicesTab.jsx';
 // settled). ProjectPnlTab.jsx and its API stay; to bring it back, re-import it
 // and add { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp }.
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
+import { VendorUploadedInvoices } from '../vendorPortal/VendorPortalInternal.jsx';
 import SectionHeading from '../../components/ui/SectionHeading.jsx';
 
 // Tabs that already draw their own heading (or, for Expenses, per-view headings) get no extra one from the hub.
-const SELF_HEADED = new Set(['expenses', 'projects', 'month-view', 'billing-setup', 'vendor-invoices']);
+const SELF_HEADED = new Set(['expenses', 'projects', 'month-view', 'billing-setup', 'vendor-invoices', 'payment-tracker']);
 const TAB_HELP = {expenses:'Submit, approve and reimburse business expense claims.',projects:'Running projects and contracts: billing terms, client agreements, project team and invoicing.','month-view':'Month by month: running projects, timesheets, billing, invoices, payments and financial status.',invoicing:'Every client invoice by month: paid, part-paid and unpaid, with payments and totals.','billing-setup':'Per-resource billing rates and the client billing status rules.','vendor-invoices':'Vendor invoices with TDS and adjustments, sent and paid status, and bank payout.','group-charges':'Charges raised between the companies of the group.',categories:'Expense and group-charge categories used across Finance.','tax-invoices':"GST (INR) and USD export invoices of this company's legal entity."};
 const BASE_TABS = [{ key: 'expenses', label: 'Expenses', icon: Receipt, need: ['basic.expenses', 'finance.view'] }];
 // GST (INR) and USD export invoices of the company's legal entity: the group admin issues them (their own tab, next to Invoicing).
@@ -36,6 +38,8 @@ const ADMIN_TABS = [
   { key: 'billing-setup', label: 'Billing Setup', icon: SlidersHorizontal, need: 'billing.view' },
   // Vendor invoices: TDS, adjustment, sent / unsent, paid / unpaid, trace, Excel export.
   { key: 'vendor-invoices', label: 'Vendor Invoices', icon: Truck, need: 'billing.view' },
+  // Vendor resources of a month: did the client pay us, did we pay the vendor, and both due dates, side by side.
+  { key: 'payment-tracker', label: 'Payment Tracker', icon: ArrowLeftRight, need: 'billing.view' },
   { key: 'group-charges', label: 'Group Charges', icon: Users2, need: 'billing.view' },
   // Admin-managed Group Charge + Expense categories (next to Group Charges).
   { key: 'categories', label: 'Categories', icon: Tags, need: 'finance.view' },
@@ -86,6 +90,7 @@ export default function FinanceHubPage() {
     { key: 'invoices', label: 'Invoices', icon: FileText, description: 'Vendor bills with TDS, adjustments, sent and paid status' },
     { key: 'charges', label: 'GST & TDS setup', icon: Percent, description: 'GST and TDS rules applied to each vendor' },
     { key: 'payout', label: 'Bank payout', icon: Banknote, description: 'Unpaid vendor invoices per vendor, ready for the bank' },
+    { key: 'uploaded', label: 'Uploaded by vendor', icon: FileText, description: 'Invoice files vendors sent through the vendor portal' },
   ];
   const tabsWithMenu = tabs.map((t) => (t.key === 'expenses' ? { ...t, blurb: TAB_HELP.expenses, children: expenseViews } : t.key === 'vendor-invoices' ? { ...t, blurb: TAB_HELP['vendor-invoices'], children: vendorViews } : t));
   const activeChildKey = section === 'expenses' ? (expenseViews.some((c) => c.key === view) ? view : 'mine') : section === 'vendor-invoices' ? (vendorViews.some((c) => c.key === view) ? view : 'invoices') : null;
@@ -100,7 +105,8 @@ export default function FinanceHubPage() {
       {section === 'invoicing' && has('invoicing') && <InvoicingSection />}
       {section === 'tax-invoices' && has('tax-invoices') && <TaxInvoicesTab />}
       {section === 'billing-setup' && has('billing-setup') && <BillingSetupTab />}
-      {section === 'vendor-invoices' && has('vendor-invoices') && <VendorInvoicesTab />}
+      {section === 'vendor-invoices' && has('vendor-invoices') && (view === 'uploaded' ? <VendorUploadedInvoices /> : <VendorInvoicesTab />)}
+      {section === 'payment-tracker' && has('payment-tracker') && <PaymentTrackerTab />}
       {section === 'group-charges' && has('group-charges') && <GroupChargesTab />}
       {section === 'categories' && has('categories') && <FinanceCategoriesTab />}
     </div>

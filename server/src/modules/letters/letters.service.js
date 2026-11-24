@@ -10,6 +10,13 @@ const AUDIENCES = ['any', 'employee', 'new_joiner', 'left_employee', 'vendor', '
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-12-31');
 const text = (max) => z.string().trim().max(max);
 
+// A field the template defines itself: HR types its value when issuing (office location, CTC, notice period ...).
+const customField = z.object({
+  key: z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9_]{0,39}$/, 'A field name starts with a letter and holds letters, digits and _'),
+  label: text(80).min(1, 'Give the field a label'),
+  hint: text(200).nullable().optional(),
+});
+
 const templateSchema = z.object({
   name: text(120).min(1, 'Give the template a name'),
   kind: z.string().trim().toLowerCase().min(1).max(40).default('other'),
@@ -20,6 +27,7 @@ const templateSchema = z.object({
   signatory_title: text(120).nullable().optional(),
   serial_prefix: text(12).min(1).max(12).regex(/^[A-Za-z0-9-]+$/, 'The prefix can hold letters, digits and a dash').default('LTR'),
   serial_format: text(60).default('{PREFIX}/{FY}/{SEQ:4}'),
+  custom_fields: z.array(customField).max(40).optional(),
   active: z.boolean().optional(),
 });
 const templateUpdateSchema = templateSchema.partial();
@@ -36,6 +44,8 @@ const letterInputSchema = z.object({
   template_id: z.string().uuid(),
   recipient: recipientSchema,
   fields: z.record(z.string().max(80), z.string().max(2000)).default({}),
+  // the office the letter is issued for (its legal name, serial prefix and address go on the letter); blank = the default office
+  location_id: z.string().uuid().nullable().optional(),
   issued_on: day.optional(),
 });
 
@@ -46,17 +56,18 @@ const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 function viewTemplate(t) {
   return {
     id: t.id, name: t.name, kind: t.kind, audience: t.audience, subject: t.subject, body: t.body, signatory_name: t.signatory_name, signatory_title: t.signatory_title,
-    serial_prefix: t.serial_prefix, serial_format: t.serial_format, active: t.active, fields: render.fieldsIn(t.subject, t.body), example_serial: exampleSerial(t), updated_at: t.updated_at,
+    serial_prefix: t.serial_prefix, serial_format: t.serial_format, active: t.active, custom_fields: Array.isArray(t.custom_fields) ? t.custom_fields : [], fields: render.fieldsIn(t.subject, t.body), example_serial: exampleSerial(t), updated_at: t.updated_at,
   };
 }
 function exampleSerial(t) {
-  const { build } = render.serialParts(t.serial_format, { prefix: t.serial_prefix, issuedOn: new Date() });
+  const { build } = render.serialParts(t.serial_format, { prefix: t.serial_prefix, issuedOn: new Date(), office: 'Ahmedabad Office' });
   return build(1);
 }
 const viewLetter = (l, { withBody = false } = {}) => ({
   id: l.id, serial_number: l.serial_number, kind: l.kind, template_name: l.template_name, recipient_type: l.recipient_type, recipient_name: l.recipient_name, recipient_email: l.recipient_email,
   org_membership_id: l.org_membership_id, account_id: l.account_id, issued_on: ymd(l.issued_on), status: l.status, cancelled_reason: l.cancelled_reason, created_at: l.created_at,
-  ...(withBody ? { subject: l.subject, body: l.body, fields: l.fields, recipient_address: l.recipient_address, signatory_name: l.signatory_name, signatory_title: l.signatory_title } : {}),
+  location_id: l.location_id || null, issuing_office: l.letterhead?.office?.name || null,
+  ...(withBody ? { letterhead: l.letterhead || null, subject: l.subject, body: l.body, fields: l.fields, recipient_address: l.recipient_address, signatory_name: l.signatory_name, signatory_title: l.signatory_title } : {}),
 });
 
 // ---- templates ---------------------------------------------------------------------------------------------------------------
@@ -66,9 +77,24 @@ async function listTemplates(orgId, { includeInactive = false } = {}) {
   return rows.map(viewTemplate);
 }
 
+/** The field names a template may not define itself: the ones that fill from the record, and duplicates. */
+function checkCustomFields(list) {
+  if (!list) return null;
+  const builtIn = new Set([...render.COMMON_FIELDS, ...render.EMPLOYEE_FIELDS, ...render.RECIPIENT_FIELDS].map(([k]) => k));
+  const seen = new Set();
+  for (const f of list) {
+    if (builtIn.has(f.key)) return `"${f.key}" is a built-in field that fills itself: choose another name`;
+    if (seen.has(f.key)) return `The field "${f.key}" is listed twice`;
+    seen.add(f.key);
+  }
+  return null;
+}
+
 async function createTemplate(orgId, user, body) {
   const bad = render.checkSerialFormat(body.serial_format);
   if (bad) return { error: 'bad_serial_format', message: bad };
+  const badField = checkCustomFields(body.custom_fields);
+  if (badField) return { error: 'bad_serial_format', message: badField };
   const row = await prisma.letterTemplate.create({ data: { ...body, org_id: orgId, created_by: user.id } });
   return { template: viewTemplate(row) };
 }
@@ -80,6 +106,8 @@ async function updateTemplate(orgId, id, body) {
     const bad = render.checkSerialFormat(body.serial_format);
     if (bad) return { error: 'bad_serial_format', message: bad };
   }
+  const badField = checkCustomFields(body.custom_fields);
+  if (badField) return { error: 'bad_serial_format', message: badField };
   const row = await prisma.letterTemplate.update({ where: { id }, data: body });
   return { template: viewTemplate(row) };
 }
@@ -97,7 +125,7 @@ function fieldCatalog() {
     common: render.COMMON_FIELDS.map(([key, label]) => ({ key, label })),
     employee: render.EMPLOYEE_FIELDS.map(([key, label]) => ({ key, label })),
     recipient: render.RECIPIENT_FIELDS.map(([key, label]) => ({ key, label })),
-    serial_tokens: [['{PREFIX}', 'the template prefix, e.g. OFR'], ['{FY}', 'financial year, e.g. 2026-27'], ['{YYYY}', 'year, e.g. 2026'], ['{YY}', 'year, e.g. 26'], ['{MM}', 'month, e.g. 11'], ['{SEQ:4}', 'running number, 4 digits']].map(([token, label]) => ({ token, label })),
+    serial_tokens: [['{PREFIX}', 'the prefix (the office own letter prefix if it has one, else the template prefix), e.g. DGPL'], ['{OFFICE}', 'the issuing office, e.g. ahmedabad'], ['{FY}', 'financial year, e.g. 2026-27'], ['{YYYY}', 'year, e.g. 2026'], ['{YY}', 'year, e.g. 26'], ['{MM}', 'month, e.g. 11'], ['{SEQ:4}', 'running number, 4 digits']].map(([token, label]) => ({ token, label })),
     kinds: KINDS,
     audiences: AUDIENCES,
   };
@@ -147,6 +175,14 @@ async function resolveRecipient(orgId, r) {
 }
 
 /** Everything a letter is built from (shared by preview and issue). */
+/** The office a letter is issued for (the one chosen, else the default one) with every office of the company for the foot of the page. */
+async function resolveOffice(orgId, locationId) {
+  const all = await prisma.location.findMany({ where: { org_id: orgId }, orderBy: [{ is_default: 'desc' }, { name: 'asc' }] });
+  const chosen = locationId ? all.find((l) => l.id === locationId) : all.find((l) => l.is_default) || null;
+  if (locationId && !chosen) return { error: 'office_not_found' };
+  return { office: chosen || null, offices: all };
+}
+
 async function compose(orgId, input, { serial } = {}) {
   const template = await prisma.letterTemplate.findFirst({ where: { id: input.template_id, org_id: orgId, deleted_at: null } });
   if (!template) return { error: 'template_not_found' };
@@ -154,11 +190,15 @@ async function compose(orgId, input, { serial } = {}) {
   const resolved = await resolveRecipient(orgId, input.recipient);
   if (resolved.error) return { error: resolved.error };
   const org = await prisma.org.findUnique({ where: { id: orgId }, select: { name: true } });
+  const where = await resolveOffice(orgId, input.location_id);
+  if (where.error) return { error: where.error };
+  const { office, offices } = where;
+  const legalName = office?.legal_name || org?.name;
   const issuedOn = input.issued_on || todayStr();
   const typed = Object.fromEntries(Object.entries(input.fields || {}).map(([k, v]) => [k.toLowerCase(), v]));
   const values = {
     ...resolved.values,
-    company_name: org?.name, date: render.longDate(issuedOn), serial_number: serial || '[serial number]',
+    company_name: legalName, company_address: office?.address || undefined, office_name: office?.name, office_address: office?.address || undefined, date: render.longDate(issuedOn), serial_number: serial || '[serial number]',
     recipient_name: resolved.recipient.name, recipient_email: resolved.recipient.email, recipient_address: resolved.recipient.address,
     ...Object.fromEntries(Object.entries(typed).filter(([, v]) => String(v).trim() !== '')), // what HR typed wins over the record
   };
@@ -166,14 +206,24 @@ async function compose(orgId, input, { serial } = {}) {
   const body = render.fill(template.body, values);
   const missing = [...new Set([...subject.missing, ...body.missing])].filter((k) => k !== 'serial_number');
   const needs = render.fieldsIn(template.subject, template.body);
-  return { template, recipient: resolved.recipient, issuedOn, values, subject: subject.text, body: body.text, missing, needs, manual: needs.filter((k) => !(k in resolved.values) && !['company_name', 'date', 'serial_number', 'recipient_name', 'recipient_email', 'recipient_address'].includes(k)) };
+  // what goes on the letterhead, kept on the letter so it reads the same years later
+  const letterhead = {
+    legal_name: legalName || null,
+    registration_info: office?.registration_info || null,
+    office: office ? { id: office.id, name: office.name, city: office.city, country: office.country, address: office.address } : null,
+    offices: offices.map((o) => ({ id: o.id, name: o.name, city: o.city, country: o.country, address: o.address })),
+  };
+  return { office, letterhead, template, recipient: resolved.recipient, issuedOn, values, subject: subject.text, body: body.text, missing, needs, manual: needs.filter((k) => !(k in resolved.values) && !['company_name', 'date', 'serial_number', 'recipient_name', 'recipient_email', 'recipient_address'].includes(k)) };
 }
 
 async function preview(orgId, input) {
   const c = await compose(orgId, input);
   if (c.error) return { error: c.error };
-  const { build } = render.serialParts(c.template.serial_format, { prefix: c.template.serial_prefix, issuedOn: toDate(c.issuedOn) });
-  return { preview: { subject: c.subject, body: c.body, missing: c.missing, fields_needed: c.needs, fields_to_type: c.manual, example_serial: build(1), recipient: c.recipient, issued_on: c.issuedOn } };
+  const { build } = render.serialParts(c.template.serial_format, { prefix: c.office?.letter_prefix || c.template.serial_prefix, issuedOn: toDate(c.issuedOn), office: c.office?.name });
+  // what HR is asked to type, with the labels and hints the template gave its own fields
+  const defined = new Map((Array.isArray(c.template.custom_fields) ? c.template.custom_fields : []).map((f) => [f.key, f]));
+  const field_info = c.manual.map((key) => ({ key, label: defined.get(key)?.label || key.replace(/_/g, ' '), hint: defined.get(key)?.hint || null, custom: defined.has(key) }));
+  return { preview: { subject: c.subject, body: c.body, missing: c.missing, fields_needed: c.needs, fields_to_type: c.manual, field_info, example_serial: build(1), office: c.office ? { id: c.office.id, name: c.office.name, legal_name: c.office.legal_name || null } : null, recipient: c.recipient, issued_on: c.issuedOn } };
 }
 
 // ---- issuing -----------------------------------------------------------------------------------------------------------------
@@ -191,7 +241,7 @@ async function issue(orgId, user, input) {
   const first = await compose(orgId, input);
   if (first.error) return { error: first.error };
   if (first.missing.length) return { error: 'missing_fields', missing: first.missing };
-  const { series, build } = render.serialParts(first.template.serial_format, { prefix: first.template.serial_prefix, issuedOn: toDate(first.issuedOn) });
+  const { series, build } = render.serialParts(first.template.serial_format, { prefix: first.office?.letter_prefix || first.template.serial_prefix, issuedOn: toDate(first.issuedOn), office: first.office?.name });
   const letter = await prisma.$transaction(async (tx) => {
     const seq = await nextNumber(tx, orgId, series);
     const serial = build(seq);
@@ -201,6 +251,7 @@ async function issue(orgId, user, input) {
         org_id: orgId, template_id: first.template.id, template_name: first.template.name, kind: first.template.kind, serial_number: serial, serial_series: series, serial_seq: seq,
         recipient_type: done.recipient.type, org_membership_id: done.recipient.org_membership_id || null, account_id: done.recipient.account_id || null,
         recipient_name: done.recipient.name, recipient_email: done.recipient.email || null, recipient_address: done.recipient.address || null,
+        location_id: done.office?.id || null, letterhead: done.letterhead,
         fields: Object.fromEntries(Object.entries(done.values).filter(([, v]) => v !== undefined && v !== null)),
         subject: done.subject || null, body: done.body, signatory_name: first.template.signatory_name, signatory_title: first.template.signatory_title,
         issued_on: toDate(done.issuedOn), created_by: user.id,

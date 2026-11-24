@@ -16,10 +16,11 @@ function financialYear(date) {
  * The series is the format with everything filled in except the running number: letters of one series are numbered one after another,
  * and a new series (a new financial year in the format, say) starts again at 1.
  */
-function serialParts(format, { prefix, issuedOn }) {
+function serialParts(format, { prefix, issuedOn, office }) {
   const d = new Date(issuedOn);
   const fill = (text) => text
     .replace(/\{PREFIX\}/g, String(prefix || 'LTR').toUpperCase())
+    .replace(/\{OFFICE\}/g, officeSlug(office) || 'office')
     .replace(/\{YYYY\}/g, String(d.getUTCFullYear()))
     .replace(/\{YY\}/g, String(d.getUTCFullYear() % 100).padStart(2, '0'))
     .replace(/\{MM\}/g, String(d.getUTCMonth() + 1).padStart(2, '0'))
@@ -34,13 +35,18 @@ function serialParts(format, { prefix, issuedOn }) {
   };
 }
 
+/** The issuing office as it reads inside a serial number: "Ahmedabad Office" -> "ahmedabad". */
+function officeSlug(name) {
+  return String(name || '').toLowerCase().replace(/\boffice\b/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 /** A format must hold exactly one {SEQ} and only known tokens, or two letters could share a number. */
 function checkSerialFormat(format) {
   const f = String(format || '');
   if (!f.trim()) return 'The serial number format is empty';
   if ((f.match(/\{SEQ(?::\d{1,2})?\}/g) || []).length !== 1) return 'The serial number format needs exactly one {SEQ} (the running number)';
-  const unknown = (f.match(/\{[^}]*\}/g) || []).filter((t) => !/^\{(PREFIX|YYYY|YY|MM|FY|SEQ(:\d{1,2})?)\}$/.test(t));
-  if (unknown.length) return `Unknown serial token ${unknown[0]}. Use {PREFIX} {YYYY} {YY} {MM} {FY} {SEQ:4}`;
+  const unknown = (f.match(/\{[^}]*\}/g) || []).filter((t) => !/^\{(PREFIX|OFFICE|YYYY|YY|MM|FY|SEQ(:\d{1,2})?)\}$/.test(t));
+  if (unknown.length) return `Unknown serial token ${unknown[0]}. Use {PREFIX} {OFFICE} {YYYY} {YY} {MM} {FY} {SEQ:4}`;
   if (f.length > 60) return 'The serial number format is too long (60 characters at most)';
   return null;
 }
@@ -68,7 +74,8 @@ const longDate = (d) => { if (!d) return ''; const x = new Date(d); return `${x.
 
 /** Fields every letter can use without typing: the company, the date and the serial number. */
 const COMMON_FIELDS = [
-  ['company_name', 'Company name'], ['company_address', 'Company address'], ['date', 'Date of the letter'], ['serial_number', 'Serial number of the letter'],
+  ['company_name', 'Company name (the legal name of the issuing office)'], ['company_address', 'Address of the issuing office'], ['office_name', 'Name of the issuing office'], ['office_address', 'Address of the issuing office'],
+  ['date', 'Date of the letter'], ['serial_number', 'Serial number of the letter'],
 ];
 /** Fields taken from an employee's record. */
 const EMPLOYEE_FIELDS = [
@@ -77,4 +84,4 @@ const EMPLOYEE_FIELDS = [
 ];
 const RECIPIENT_FIELDS = [['recipient_name', 'Name of the person or company'], ['recipient_email', 'Email'], ['recipient_address', 'Address']];
 
-module.exports = { financialYear, serialParts, checkSerialFormat, fieldsIn, fill, longDate, COMMON_FIELDS, EMPLOYEE_FIELDS, RECIPIENT_FIELDS };
+module.exports = { officeSlug, financialYear, serialParts, checkSerialFormat, fieldsIn, fill, longDate, COMMON_FIELDS, EMPLOYEE_FIELDS, RECIPIENT_FIELDS };

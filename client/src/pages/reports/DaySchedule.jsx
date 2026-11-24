@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { AlertTriangle } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import MultiSelectDropdown from '../../components/ui/MultiSelectDropdown.jsx';
+import Modal from '../../components/ui/Modal.jsx';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const toMin = (hhmm) => {
@@ -59,6 +61,7 @@ export default function DaySchedule() {
   const [selPeople, setSelPeople] = useState([]);
   // Picking projects also picks the people allocated to them today (switch off to choose the employees by hand).
   const [autoPeople, setAutoPeople] = useState(true);
+  const [noticeOpen, setNoticeOpen] = useState(false); // the list of projects without working hours and employees without a shift
 
   useEffect(() => {
     apiClient.get('/reports/day-schedule').then((res) => setData(res.data.data), (e) => pushError(apiErrorMessage(e, 'Could not load the schedule'), 'Load failed'));
@@ -101,8 +104,61 @@ export default function DaySchedule() {
   const allProjectIds = withHours.map((p) => p.id);
   const allShiftIds = data.shifts.map((s) => s.id);
 
+  const missingProjects = data.missing?.projects || [];
+  const missingPeople = data.missing?.employees || [];
+  const hasMissing = missingProjects.length > 0 || missingPeople.length > 0;
+
   return (
     <div className="space-y-4" data-testid="day-schedule">
+      {hasMissing && (
+        <div role="alert" data-testid="missing-hours-notice" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <div>
+              <p className="font-semibold">Working hours are not set everywhere yet</p>
+              <p className="text-xs">
+                {missingProjects.length > 0 && <span data-testid="missing-projects-count">{missingProjects.length} project{missingProjects.length === 1 ? ' has' : 's have'} no working hours</span>}
+                {missingProjects.length > 0 && missingPeople.length > 0 && ' · '}
+                {missingPeople.length > 0 && <span data-testid="missing-people-count">{missingPeople.length} employee{missingPeople.length === 1 ? ' has' : 's have'} no shift added</span>}
+                . They do not appear in the 24-hour day below.
+              </p>
+            </div>
+          </div>
+          <button type="button" className="btn-secondary" data-testid="see-missing" onClick={() => setNoticeOpen(true)}>See the list</button>
+        </div>
+      )}
+      <Modal open={noticeOpen} wide title="Working hours still to be set" onClose={() => setNoticeOpen(false)} footer={<button type="button" className="btn-secondary" onClick={() => setNoticeOpen(false)}>Close</button>}>
+        <div className="space-y-5" data-testid="missing-hours-list">
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Projects with no working hours ({missingProjects.length})</h3>
+            <p className="mt-0.5 text-[11px] text-tertiary-500">Set the start and end time of the project (Finance &gt; Projects &gt; open the project).</p>
+            {missingProjects.length === 0 ? <p className="mt-2 text-sm text-tertiary-500">Every running project has its working hours.</p> : (
+              <ul className="mt-2 max-h-56 divide-y divide-tertiary-100 overflow-auto rounded-xl border border-tertiary-100">
+                {missingProjects.map((p) => (
+                  <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span><span className="font-medium text-tertiary-900">{p.code ? `${p.code} ` : ''}{p.name}</span>{p.client && <span className="block text-xs text-tertiary-500">{p.client}</span>}</span>
+                    {p.on_hold && <span className="rounded-full bg-tertiary-100 px-2 py-0.5 text-[11px] text-tertiary-600">On hold</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary-500">Employees with no shift added ({missingPeople.length})</h3>
+            <p className="mt-0.5 text-[11px] text-tertiary-500">Give each person a shift (People &gt; the employee &gt; Shift, shifts are made in HR Settings). Contractors follow their project&apos;s hours.</p>
+            {missingPeople.length === 0 ? <p className="mt-2 text-sm text-tertiary-500">Every employee is on a shift.</p> : (
+              <ul className="mt-2 max-h-56 divide-y divide-tertiary-100 overflow-auto rounded-xl border border-tertiary-100">
+                {missingPeople.map((e) => (
+                  <li key={e.membership_id} className="px-3 py-2 text-sm">
+                    <span className="font-medium text-tertiary-900">{e.name}</span>
+                    <span className="block text-xs text-tertiary-500">{[e.employee_code, e.team, e.department].filter(Boolean).join(' · ') || '—'}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </Modal>
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-tertiary-100 bg-white p-3 shadow-card">
         <div className="w-64"><MultiSelectDropdown value={selProjects} onChange={pickProjects} options={projectOptions} placeholder="All projects" searchPlaceholder="Search projects…" emptyMessage="No project yet." /></div>
         <div className="w-64"><MultiSelectDropdown value={selPeople} onChange={setSelPeople} options={peopleOptions} placeholder="All employees" searchPlaceholder="Search employees…" emptyMessage="No employee is on a shift yet." /></div>

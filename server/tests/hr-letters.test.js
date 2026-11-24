@@ -74,6 +74,127 @@ describe('templates', () => {
   });
 });
 
+describe('fields a template defines itself', () => {
+  test('the template defines its own fields with a label and a hint; HR types them when issuing and they reach the letter and the PDF', async () => {
+    const created = await offerTemplate({
+      body: 'Dear {{employee_name}},\n\nYou will work from {{office_location}} on {{work_timing}}. Your joining bonus is {{bonus}}.\n\nRef {{serial_number}}',
+      subject: null,
+      custom_fields: [
+        { key: 'office_location', label: 'Office location', hint: 'City and office name' },
+        { key: 'work_timing', label: 'Work timing' },
+        { key: 'bonus', label: 'Joining bonus' },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const tpl = created.body.data;
+    expect(tpl.custom_fields.map((x) => x.key)).toEqual(['office_location', 'work_timing', 'bonus']);
+    const e = await employee('Asha Rao');
+    const recipient = { type: 'employee', org_membership_id: e.id };
+
+    // nothing typed yet: the preview asks for the three fields, with their labels and hints, and issuing is refused
+    const pre = (await post('/preview', { template_id: tpl.id, recipient })).body.data;
+    expect(pre.fields_to_type).toEqual(['office_location', 'work_timing', 'bonus']);
+    expect(pre.field_info).toEqual([
+      { key: 'office_location', label: 'Office location', hint: 'City and office name', custom: true },
+      { key: 'work_timing', label: 'Work timing', hint: null, custom: true },
+      { key: 'bonus', label: 'Joining bonus', hint: null, custom: true },
+    ]);
+    expect((await post('', { template_id: tpl.id, recipient })).status).toBe(422);
+
+    // typed by HR: the letter carries them
+    const fields = { office_location: 'Indore, Vijay Nagar', work_timing: '10:00 am - 7:00 pm', bonus: 'Rs. 25,000' };
+    const issued = await post('', { template_id: tpl.id, recipient, fields });
+    expect(issued.status).toBe(201);
+    const letter = issued.body.data;
+    expect(letter.body).toContain('Indore, Vijay Nagar');
+    expect(letter.body).toContain('10:00 am - 7:00 pm');
+    expect(letter.body).not.toMatch(/\[office_location\]|\{\{/);
+    const pdf = await authed(request(app).get(`${L}/${letter.id}/pdf`), adminToken);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toMatch(/pdf/);
+  });
+
+  test('a field that fills itself cannot be redefined, a name must be valid and unique, and the fields can be edited later', async () => {
+    const bad = (custom_fields) => offerTemplate({ custom_fields });
+    expect((await bad([{ key: 'employee_name', label: 'Mine' }])).status).toBe(422); // built-in
+    expect((await bad([{ key: 'ctc', label: 'CTC' }, { key: 'CTC', label: 'again' }])).status).toBe(422); // twice
+    expect((await bad([{ key: '9lives', label: 'x' }])).status).toBe(422); // not a valid name
+    const ok = await offerTemplate({ custom_fields: [{ key: 'ctc', label: 'Annual CTC' }] });
+    expect(ok.status).toBe(201);
+    const id = ok.body.data.id;
+    const edited = await patch(`/templates/${id}`, { custom_fields: [{ key: 'ctc', label: 'Annual CTC (INR)', hint: 'in rupees' }, { key: 'grade', label: 'Grade' }] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.custom_fields).toHaveLength(2);
+    // a template saved without any keeps an empty list
+    const none = await offerTemplate({ name: 'Plain' });
+    expect(none.body.data.custom_fields).toEqual([]);
+  });
+});
+
+describe('letters on the letterhead: the issuing office', () => {
+  const offices = async () => {
+    const gurugram = await prisma.location.create({ data: { org_id: org.id, name: 'Gurugram Office', city: 'Gurugram', country: 'India', address: 'Sector 44, Gurugram, Haryana', is_default: true, legal_name: 'Delphic Global Private Limited', letter_prefix: 'dgpl', registration_info: 'CIN U72900HR2020PTC000000' } });
+    const dubai = await prisma.location.create({ data: { org_id: org.id, name: 'Dubai Office', city: 'Dubai', country: 'United Arab Emirates', address: 'Business Bay, Dubai', legal_name: 'Delphic Global LLC', letter_prefix: 'DGL' } });
+    const ahmedabad = await prisma.location.create({ data: { org_id: org.id, name: 'Ahmedabad Office', city: 'Ahmedabad', country: 'India', address: 'SG Highway, Ahmedabad' } });
+    return { gurugram, dubai, ahmedabad };
+  };
+  const template = (over = {}) => offerTemplate({ serial_prefix: 'LTR', serial_format: '{PREFIX}/Appo/{OFFICE}/{SEQ:4}', subject: 'Letter of Appointment', body: 'Dear {{employee_name}},\n\n{{company_name}} ({{office_name}}) is delighted to appoint you. Address: {{office_address}}. Ref {{serial_number}}', ...over });
+
+  test('the serial number carries the office; each office has its own legal name and prefix on the letter', async () => {
+    const o = await offices();
+    const t = (await template()).body.data;
+    expect(t.example_serial).toBe('LTR/Appo/ahmedabad/0001');
+    const m = await employee('Asha Rao');
+    const recipient = { type: 'employee', org_membership_id: m.id };
+
+    // Dubai: its own legal name and prefix, the office in the number
+    const dubai = (await post('', { template_id: t.id, recipient, location_id: o.dubai.id })).body.data;
+    expect(dubai.serial_number).toBe('DGL/Appo/dubai/0001');
+    expect(dubai.body).toContain('Delphic Global LLC (Dubai Office)');
+    expect(dubai.body).toContain('Business Bay, Dubai');
+    expect(dubai.location_id).toBe(o.dubai.id);
+    expect(dubai.issuing_office).toBe('Dubai Office');
+    expect(dubai.letterhead.legal_name).toBe('Delphic Global LLC');
+    expect(dubai.letterhead.offices.map((x) => x.name)).toEqual(['Gurugram Office', 'Ahmedabad Office', 'Dubai Office']); // the default first, then by name
+
+    // Ahmedabad has no legal name or prefix of its own: the company name and the template prefix are used
+    const ahd = (await post('', { template_id: t.id, recipient, location_id: o.ahmedabad.id })).body.data;
+    expect(ahd.serial_number).toBe('LTR/Appo/ahmedabad/0001');
+    expect(ahd.body).toContain(`${org.name} (Ahmedabad Office)`);
+
+    // no office chosen: the default office; and each office has its own running number
+    const def = (await post('', { template_id: t.id, recipient })).body.data;
+    expect(def.serial_number).toBe('DGPL/Appo/gurugram/0001');
+    expect(def.letterhead.office.name).toBe('Gurugram Office');
+    const again = (await post('', { template_id: t.id, recipient, location_id: o.dubai.id })).body.data;
+    expect(again.serial_number).toBe('DGL/Appo/dubai/0002');
+
+    // another company's office, or an unknown one, is refused
+    expect((await post('', { template_id: t.id, recipient, location_id: '00000000-0000-4000-8000-000000000000' })).status).toBe(404);
+
+    // the list shows the office, the PDF is on the letterhead (a real PDF with the logo and footer), and the preview names the office
+    const list = (await get('')).body.data;
+    expect(list.find((l) => l.id === dubai.id).issuing_office).toBe('Dubai Office');
+    const pdf = await authed(request(app).get(`${L}/${dubai.id}/pdf`), adminToken).buffer(true).parse((res, cb) => { const c = []; res.on('data', (d) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(pdf.status).toBe(200);
+    expect(pdf.body.slice(0, 5).toString()).toBe('%PDF-');
+    const pre = (await post('/preview', { template_id: t.id, recipient, location_id: o.dubai.id })).body.data;
+    expect(pre.office).toMatchObject({ name: 'Dubai Office', legal_name: 'Delphic Global LLC' });
+    expect(pre.example_serial).toBe('DGL/Appo/dubai/0001'); // the preview shows the shape of the number, numbered 1
+  });
+
+  test('an office saves its legal name, letter prefix and registration line', async () => {
+    const created = await authed(request(app).post('/api/v1/orgs/locations'), adminToken).send({ name: 'Pune Office', city: 'Pune', legal_name: 'Delphic Pune LLP', letter_prefix: 'dpl', registration_info: 'LLPIN AAA-0000' });
+    expect(created.status).toBe(201);
+    const loc = created.body.data;
+    expect(loc).toMatchObject({ legal_name: 'Delphic Pune LLP', letter_prefix: 'DPL', registration_info: 'LLPIN AAA-0000' });
+    const edited = await authed(request(app).patch(`/api/v1/orgs/locations/${loc.id}`), adminToken).send({ legal_name: '', letter_prefix: 'dp2' });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toMatchObject({ legal_name: null, letter_prefix: 'DP2' });
+    expect((await authed(request(app).patch(`/api/v1/orgs/locations/${loc.id}`), adminToken).send({ letter_prefix: 'bad prefix!' })).status).toBe(422);
+  });
+});
+
 describe('issuing letters', () => {
   test('an employee letter fills from the record, asks for what is typed by hand, and gets the next serial number', async () => {
     const m = await employee('Asha Rao');

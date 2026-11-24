@@ -41,6 +41,9 @@ const updateLocationSchema = z
     city: z.string().max(100).nullable().optional(),
     country: z.string().max(100).nullable().optional(),
     address: z.string().trim().max(500).nullable().optional(),
+    legal_name: z.string().trim().max(150).nullable().optional(),
+    letter_prefix: z.string().trim().max(12).regex(/^[A-Za-z0-9-]*$/, 'The prefix can hold letters, digits and a dash').nullable().optional(),
+    registration_info: z.string().trim().max(300).nullable().optional(),
     is_default: z.boolean().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'Change at least one field' });
@@ -50,6 +53,9 @@ const createLocationSchema = z.object({
   city: z.string().max(100).optional(),
   country: z.string().max(100).optional(),
   address: z.string().trim().max(500).optional(),
+  legal_name: z.string().trim().max(150).optional(),
+  letter_prefix: z.string().trim().max(12).regex(/^[A-Za-z0-9-]*$/, 'The prefix can hold letters, digits and a dash').optional(),
+  registration_info: z.string().trim().max(300).optional(),
   is_default: z.boolean().default(false),
 });
 

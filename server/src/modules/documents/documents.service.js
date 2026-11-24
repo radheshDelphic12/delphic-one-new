@@ -40,7 +40,7 @@ async function list({ entity_type, entity_id }, user) {
   return { documents: rows.map(serialize) };
 }
 
-async function create({ entity_type, entity_id, label, file }, user) {
+async function create({ entity_type, entity_id, label, doc_type, file }, user) {
   if (!file) return { error: 'file_required' };
 
   const access = await assertCanAccessEntity(user, entity_type, entity_id, { forWrite: true });
@@ -55,6 +55,7 @@ async function create({ entity_type, entity_id, label, file }, user) {
       file_type: file.mimetype,
       file_size_bytes: file.size,
       uploaded_by: user.id,
+      doc_type: doc_type || null,
     },
     include: { uploaded_by_user: { select: { id: true, name: true } } },
   });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ShareWithVendors } from '../vendorPortal/VendorPortalInternal.jsx';
 import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
@@ -346,6 +347,7 @@ export default function RequirementDetailPage() {
           <button type="button" className="btn-secondary" onClick={() => setAssignRole('vendor_team')}>
             {canAssignRecruiters(user, requirement) ? 'Assign vendor team' : 'View vendor team'}
           </button>
+          <ShareWithVendors requirementId={id} />
           <Link to={`/requirements/${id}/board`} className="btn-secondary">
             Pipeline board
           </Link>

@@ -160,12 +160,12 @@ async function officesOverview(orgId, filters = {}) {
 
 // An org has ONE default location: marking a location as the default moves
 // the flag, so two defaults never coexist.
-async function createLocation(orgId, { name, city, country, address, is_default }) {
+async function createLocation(orgId, { name, city, country, address, legal_name, letter_prefix, registration_info, is_default }) {
   const existing = await prisma.location.findUnique({ where: { org_id_name: { org_id: orgId, name } } });
   if (existing) return { error: 'name_taken' };
   const location = await prisma.$transaction(async (tx) => {
     if (is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true }, data: { is_default: false } });
-    return tx.location.create({ data: { org_id: orgId, name, city, country, address, is_default } });
+    return tx.location.create({ data: { org_id: orgId, name, city, country, address, legal_name: legal_name || null, letter_prefix: letter_prefix ? letter_prefix.toUpperCase() : null, registration_info: registration_info || null, is_default } });
   });
   return { location };
 }
@@ -179,7 +179,8 @@ async function updateLocation(orgId, locationId, patch) {
   }
   const updated = await prisma.$transaction(async (tx) => {
     if (patch.is_default) await tx.location.updateMany({ where: { org_id: orgId, is_default: true, id: { not: locationId } }, data: { is_default: false } });
-    return tx.location.update({ where: { id: locationId }, data: patch });
+    const data = { ...patch, ...(patch.letter_prefix ? { letter_prefix: patch.letter_prefix.toUpperCase() } : {}), ...(patch.letter_prefix === '' ? { letter_prefix: null } : {}), ...(patch.legal_name === '' ? { legal_name: null } : {}), ...(patch.registration_info === '' ? { registration_info: null } : {}) };
+    return tx.location.update({ where: { id: locationId }, data });
   });
   return { location: updated };
 }
