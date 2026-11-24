@@ -17,6 +17,9 @@ export function entityLink({ entity_type, entity_id, metadata } = {}) {
     case 'resignation':
       return '/settings?tab=resignations';
     // Speak Up: a handler lands in the inbox, the person who raised it in My complaints
+    // a candidate a vendor put forward: the point of contact lands on the inbox at the top of Submissions
+    case 'vendor_submission':
+      return '/submissions';
     case 'whistle_case':
       return metadata?.audience === 'reporter' ? '/speak-up?tab=mine' : '/speak-up?tab=inbox';
     case 'pm_ticket':

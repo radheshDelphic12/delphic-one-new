@@ -749,6 +749,46 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await authed(request(app).get('/api/v1/billing/payment-tracker'), (await loginAs(emp)).access_token).query(AUG)).status).toBeGreaterThanOrEqual(401);
   });
 
+  test('payment tracker: one vendor resource can be marked paid on its own, and unmarked; only a vendor resource of the company, and only by an admin', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    const tracker = async () => (await api('get', '/payment-tracker').query(AUG)).body.data;
+    const body = { org_membership_id: contractor.id, project_id: p.id, ...AUG };
+    const mark = (extra = {}) => authed(request(app).put('/api/v1/billing/payment-tracker/resource-payment'), ctx.adminToken).send({ ...body, ...extra });
+
+    let d = await tracker();
+    expect(d.rows[0]).toMatchObject({ org_membership_id: contractor.id, vendor_paid: false, vendor_resource: { paid: false, source: null } });
+    expect((await tracker()).summary.resources_paid).toBe(0);
+
+    const done = await mark({ paid_on: '2026-09-12', note: 'UTR 123' });
+    expect(done.status).toBe(200);
+    d = await tracker();
+    expect(d.rows[0].vendor_resource).toMatchObject({ paid: true, source: 'marked', paid_on: '2026-09-12', note: 'UTR 123' });
+    expect(d.summary.resources_paid).toBe(1);
+    // a paid resource leaves the "vendor not paid" view
+    expect((await api('get', '/payment-tracker').query({ ...AUG, status: 'vendor_pending' })).body.data.rows).toHaveLength(0);
+    // marking again only changes the date and note
+    expect((await mark({ paid_on: '2026-09-14', note: 'UTR 124' })).status).toBe(200);
+    expect((await tracker()).rows[0].vendor_resource).toMatchObject({ paid_on: '2026-09-14', note: 'UTR 124' });
+    expect(await prisma.vendorResourcePayment.count()).toBe(1);
+
+    const undo = () => authed(request(app).delete('/api/v1/billing/payment-tracker/resource-payment'), ctx.adminToken).query(body);
+    expect((await undo()).status).toBe(200);
+    expect((await undo()).status).toBe(404); // nothing left to remove
+    expect((await tracker()).rows[0].vendor_resource.paid).toBe(false);
+
+    // somebody who is not a vendor resource, and an employee login
+    const other = await createUser({ role: 'employee', name: 'Plain Employee' });
+    const plain = await createOrgMembership(other.id, ctx.org.id, { role: 'employee' });
+    expect((await mark({ org_membership_id: plain.id })).status).toBe(404);
+    expect((await authed(request(app).put('/api/v1/billing/payment-tracker/resource-payment'), (await loginAs(other)).access_token).send(body)).status).toBeGreaterThanOrEqual(401);
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

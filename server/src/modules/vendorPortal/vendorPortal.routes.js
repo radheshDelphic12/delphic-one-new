@@ -21,6 +21,7 @@ const ERRORS = {
   not_pending: [409, 'This candidate has already been decided'],
   email_taken: [409, 'That email already has a vendor portal login'],
   reason_required: [422, 'Give a reason'],
+  bad_reset_link: [400, 'This reset link is not valid any more. Ask for a new one'],
 };
 const problem = (res, r) => { const [status, message] = ERRORS[r.error] || [400, 'Bad request']; return fail(res, status, message); };
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 11 * 1024 * 1024, files: 1 } });
@@ -39,6 +40,15 @@ const portal = express.Router();
 portal.post('/login', asyncHandler(async (req, res) => {
   const r = await service.login(service.loginSchema.parse(req.body || {}));
   return r.error ? problem(res, r) : ok(res, r);
+}));
+
+portal.post('/forgot-password', asyncHandler(async (req, res) => {
+  await service.forgotPassword(service.forgotSchema.parse(req.body || {}).email);
+  return ok(res, { sent: true }); // the same answer whether or not the email has a login
+}));
+portal.post('/reset-password', asyncHandler(async (req, res) => {
+  const r = await service.resetPassword(service.resetSchema.parse(req.body || {}));
+  return r.error ? problem(res, r) : ok(res, { reset: true });
 }));
 
 const portalAuth = asyncHandler(async (req, res, next) => {

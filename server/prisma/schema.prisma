@@ -383,6 +383,7 @@ enum NotificationType {
   ai_interview_completed
   whistleblower_new
   whistleblower_update
+  vendor_candidate_submitted
 }
 
 enum NotificationEntityType {
@@ -394,6 +395,7 @@ enum NotificationEntityType {
   pm_ticket
   resignation
   whistle_case
+  vendor_submission
 }
 
 enum HistoryEntityType {
@@ -10279,6 +10281,9 @@ model VendorPortalUser {
   password_hash     String
   active            Boolean   @default(true)
   last_login_at     DateTime?
+  // "Forgot password": the hash of the emailed token and when it stops working
+  reset_token_hash  String?
+  reset_expires_at  DateTime?
   created_by        String    @db.Uuid
   created_at        DateTime  @default(now())
   updated_at        DateTime  @default(now()) @updatedAt
@@ -10366,6 +10371,26 @@ model VendorPortalInvoice {
   @@index([org_id, status])
   @@index([vendor_account_id, period_year, period_month])
   @@map("vendor_portal_invoices")
+}
+
+// A vendor resource marked paid for a month on the Payment Tracker (the vendor payment itself is one row per vendor and month).
+model VendorResourcePayment {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String   @db.Uuid
+  org_membership_id String   @db.Uuid
+  project_id        String   @db.Uuid
+  vendor_account_id String   @db.Uuid
+  period_month      Int
+  period_year       Int
+  paid_on           DateTime @db.Date
+  amount            Decimal? @db.Decimal(14, 2)
+  note              String?
+  marked_by         String   @db.Uuid
+  created_at        DateTime @default(now())
+
+  @@unique([org_membership_id, project_id, period_month, period_year], map: "vendor_resource_payments_resource_month_key")
+  @@index([org_id, period_year, period_month])
+  @@map("vendor_resource_payments")
 }
 
 // ===================== Document Centre =====================

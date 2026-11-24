@@ -64,6 +64,8 @@ const ROLE_EVENT_MATRIX = {
   // handler or a reporter, so everyone lists them in their preferences, and the module honours a person's choice to mute them.
   whistleblower_new: { roles: TIMESHEET_ROLES, defaultInApp: true },
   whistleblower_update: { roles: TIMESHEET_ROLES, defaultInApp: true },
+  // Vendor portal: to the vendor's point of contact (or the admins when it has none), written straight to the bell by the module.
+  vendor_candidate_submitted: { roles: TIMESHEET_ROLES, defaultInApp: true },
 };
 
 const NOTIFICATION_TYPES = Object.keys(ROLE_EVENT_MATRIX);
@@ -103,6 +105,7 @@ const NOTIFICATION_LABELS = {
   timesheet_regularization_decided: ['Regularisation decision', 'Your regularisation request is approved or rejected.'],
   whistleblower_new: ['Speak Up: new complaint', 'A complaint is raised or assigned to you as a handler.'],
   whistleblower_update: ['Speak Up: update', 'A reply or a status change on a complaint.'],
+  vendor_candidate_submitted: ['Candidate from a vendor', 'A vendor puts a candidate forward through the vendor portal for a vendor you are in charge of.'],
   resignation_submitted: ['Resignation submitted', 'An employee submits a resignation (to their reporting manager, HR and admins).'],
   resignation_manager_updated: ['Resignation: manager update', 'A manager records the retention call on a resignation (to HR and admins).'],
   resignation_decided: ['Resignation decision', 'Your resignation is approved, rejected or closed as retained, or the F&F is started.'],
@@ -259,6 +262,8 @@ function renderNotification(type, ctx = {}) {
       return envelope('Resignation submitted', `${ctx.employeeName || 'An employee'} has resigned (proposed last working day ${ctx.lwd || 'not set'}).`, 'resignation', ctx.resignationId, ctx);
     case 'resignation_manager_updated':
       return envelope('Resignation: manager update', `${ctx.managerName || 'The manager'} updated the retention call for ${ctx.employeeName || 'an employee'}: ${ctx.outcomeLabel || 'update recorded'}.`, 'resignation', ctx.resignationId, ctx);
+    case 'vendor_candidate_submitted':
+      return envelope(ctx.title || 'Candidate from a vendor', ctx.body || '', 'vendor_submission', ctx.submissionId, ctx);
     case 'whistleblower_new':
     case 'whistleblower_update':
       return envelope(ctx.title || 'Speak Up', ctx.body || '', 'whistle_case', ctx.caseId, ctx);

@@ -198,7 +198,18 @@ export default function VendorInvoicesTab() {
   }
 
   // One list: the month's project invoices, then its normal purchases (a vendor bill with no project).
-  const tableRows = [...(rows || []).map((r) => ({ ...r, kind: 'invoice' })), ...purchases];
+  const allRows = [...(rows || []).map((r) => ({ ...r, kind: 'invoice' })), ...purchases];
+  // Collection filter, as on client invoices: overdue / a follow-up is due / no due date set (unpaid ones only)
+  const [collect, setCollect] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const unpaid = (r) => !r.paid && (r.kind !== 'purchase' || r.status === 'active');
+  const isOverdue = (r) => (r.kind === 'purchase' ? unpaid(r) && Boolean(r.due_date) && String(r.due_date).slice(0, 10) < today : Boolean(r.overdue));
+  const isFollowupDue = (r) => r.kind !== 'purchase' && Boolean(r.followup_due);
+  const noDueDate = (r) => unpaid(r) && !r.due_date;
+  const overdueCount = allRows.filter(isOverdue).length;
+  const followupDueCount = allRows.filter(isFollowupDue).length;
+  const noDueDateCount = allRows.filter(noDueDate).length;
+  const tableRows = !collect ? allRows : allRows.filter((r) => (collect === 'overdue' ? isOverdue(r) : collect === 'followup_due' ? isFollowupDue(r) : noDueDate(r)));
 
   const columns = [
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor_account?.name || '—' },
@@ -279,6 +290,9 @@ export default function VendorInvoicesTab() {
           </label>
           <label className="text-xs font-medium text-tertiary-600">Year
             <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="mt-1 block rounded-xl border px-3 py-2 text-sm">{[now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">Collection
+            <select value={collect} onChange={(e) => setCollect(e.target.value)} aria-label="Collection" data-testid="vendor-collection-filter" className="mt-1 block rounded-xl border px-3 py-2 text-sm"><option value="">All</option><option value="overdue">Overdue ({overdueCount})</option><option value="followup_due">Follow-up due ({followupDueCount})</option><option value="no_due_date">No due date set ({noDueDateCount})</option></select>
           </label>
           <button type="button" className="btn-secondary inline-flex items-center gap-1.5" onClick={exportVendor}><Download className="h-4 w-4" /> Vendor Excel</button>
           <button type="button" className="btn-primary inline-flex items-center gap-1.5" data-testid="vendor-purchase-add" onClick={() => setPurchaseDrawer({ open: true, purchase: null })}><Plus className="h-4 w-4" /> Add purchase</button>
