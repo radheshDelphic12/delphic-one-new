@@ -35,7 +35,7 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
   const navigate = useNavigate();
   const isEditing = Boolean(id);
   const [form, setForm] = useState(emptyProfileForm());
-  const userOptions = useAllUserOptions(isEditing && user?.role === 'admin');
+  const userOptions = useAllUserOptions(isEditing);
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
@@ -394,8 +394,8 @@ export default function ProfileFormPage({ asPanel = false, onDone, onCancel }) {
                 </label>
               </Field>
             )}
-            {isEditing && user?.role === 'admin' && (
-              <Field label="Added by">
+            {isEditing && (
+              <Field label="Added by (sourcer)">
                 <SearchableSelect
                   value={form.added_by}
                   onChange={(v) => updateField('added_by', v)}

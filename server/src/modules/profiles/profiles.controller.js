@@ -24,7 +24,7 @@ const create = asyncHandler(async (req, res) => {
 const update = asyncHandler(async (req, res) => {
   const body = updateSchema.parse(req.body);
   if (body.added_by !== undefined) {
-    if (req.user.role !== 'admin') return fail(res, 403, 'Only an admin can change Added by');
+    // Anyone allowed to edit the profile (route check) may change the sourcer.
     if (!(await service.userExists(body.added_by))) return fail(res, 422, 'Selected user does not exist');
   }
   const profile = await service.update(req.params.id, body);

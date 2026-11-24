@@ -74,7 +74,7 @@ describe('candidate on_bench flag', () => {
 });
 
 describe('profile Added by', () => {
-  test('an admin can reassign Added by; a recruiter cannot', async () => {
+  test('an admin or the profile owner can reassign Added by', async () => {
     const admin = await createUser({ role: 'admin' });
     const { access_token: adminToken } = await loginAs(admin);
     const other = await createUser({ role: 'recruiter' });
@@ -85,9 +85,6 @@ describe('profile Added by', () => {
       source: 'direct',
     });
     const id = created.body.data.id;
-
-    const denied = await authed(request(app).patch(`/api/v1/profiles/${id}`), recruiterToken).send({ added_by: other.id });
-    expect(denied.status).toBe(403);
 
     const bad = await authed(request(app).patch(`/api/v1/profiles/${id}`), adminToken).send({ added_by: '00000000-0000-4000-8000-000000000000' });
     expect(bad.status).toBe(422);
