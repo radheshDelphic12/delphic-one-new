@@ -1,6 +1,7 @@
 // Pure rules of HR letters: the serial number format, the {{fields}} of a template and the final text. No database here.
 
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const { isHtml, escapeHtml } = require('./letters.html');
 const FIELD_RE = /\{\{\s*([a-z][a-z0-9_]*)\s*\}\}/gi;
 
 /** Indian financial year of a date, e.g. 2026-27 (April to March). */
@@ -61,11 +62,13 @@ function fieldsIn(...texts) {
 /** Fill {{fields}}; a field with no value stays visible as [field] so a preview shows what is missing. Returns { text, missing }. */
 function fill(text, values) {
   const missing = [];
+  // text written in the rich-text editor is HTML: the values typed or taken from a record are escaped so they can never add markup
+  const html = isHtml(text);
   const out = String(text || '').replace(FIELD_RE, (_, name) => {
     const key = name.toLowerCase();
     const v = values[key];
     if (v === undefined || v === null || String(v).trim() === '') { if (!missing.includes(key)) missing.push(key); return `[${key}]`; }
-    return String(v);
+    return html ? escapeHtml(v) : String(v);
   });
   return { text: out, missing };
 }

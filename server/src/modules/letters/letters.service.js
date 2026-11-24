@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const prisma = require('../../config/db');
 const render = require('./letters.render');
+const htmlText = require('./letters.html');
+const richText = require('../../lib/richText');
 
 // HR letters (docs/features/HR-LETTERS.md): admin-set templates, a unique serial number per letter, and every letter issued kept with its own text.
 // Letters are per company (the caller's active workspace). A letter is never edited after it is issued: it is cancelled with a reason.
@@ -22,7 +24,7 @@ const templateSchema = z.object({
   kind: z.string().trim().toLowerCase().min(1).max(40).default('other'),
   audience: z.enum(AUDIENCES).default('any'),
   subject: text(200).nullable().optional(),
-  body: z.string().trim().min(1, 'The letter text is empty').max(20000),
+  body: z.string().trim().min(1, 'The letter text is empty').max(120000),
   signatory_name: text(120).nullable().optional(),
   signatory_title: text(120).nullable().optional(),
   serial_prefix: text(12).min(1).max(12).regex(/^[A-Za-z0-9-]+$/, 'The prefix can hold letters, digits and a dash').default('LTR'),
@@ -90,7 +92,17 @@ function checkCustomFields(list) {
   return null;
 }
 
-async function createTemplate(orgId, user, body) {
+/** A template written in the rich-text editor is stored as sanitised HTML (only simple formatting survives); an empty editor is refused. */
+function cleanBody(input) {
+  if (typeof input.body !== 'string' || !htmlText.isHtml(input.body)) return input;
+  const html = richText.cleanHtml(input.body);
+  if (!richText.plainText(html)) return { error: 'bad_serial_format', message: 'The letter text is empty' };
+  return { ...input, body: html };
+}
+
+async function createTemplate(orgId, user, input) {
+  const body = cleanBody(input);
+  if (body.error) return body;
   const bad = render.checkSerialFormat(body.serial_format);
   if (bad) return { error: 'bad_serial_format', message: bad };
   const badField = checkCustomFields(body.custom_fields);
@@ -99,7 +111,9 @@ async function createTemplate(orgId, user, body) {
   return { template: viewTemplate(row) };
 }
 
-async function updateTemplate(orgId, id, body) {
+async function updateTemplate(orgId, id, input) {
+  const body = cleanBody(input);
+  if (body.error) return body;
   const existing = await prisma.letterTemplate.findFirst({ where: { id, org_id: orgId, deleted_at: null } });
   if (!existing) return { error: 'not_found' };
   if (body.serial_format !== undefined) {

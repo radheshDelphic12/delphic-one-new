@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useImperativeHandle, useRef } from 'react';
 import { Bold, Heading2, Heading3, Italic, Link2, List, ListOrdered, Minus, Quote, Redo2, Underline, Undo2 } from 'lucide-react';
 import { promptAction } from '../../lib/confirmAction.js';
 
@@ -22,8 +22,13 @@ const TOOLS = [
  * so the caret never jumps. The parent receives the HTML via `onChange`; the
  * server sanitizes it before storing.
  */
-export default function RichTextEditor({ value, onChange, resetKey, placeholder = 'Start writing…', minHeight = '18rem' }) {
+export default function RichTextEditor({ value, onChange, resetKey, placeholder = 'Start writing…', minHeight = '18rem', apiRef = null }) {
   const ref = useRef(null);
+
+  // lets the parent drop text at the caret (for example a {{field}} chip): `apiRef.current.insertText('{{name}}')`
+  useImperativeHandle(apiRef, () => ({
+    insertText: (text) => { ref.current?.focus(); document.execCommand('insertText', false, text); onChange(ref.current.innerHTML); },
+  }), [onChange]);
 
   useEffect(() => {
     if (ref.current) ref.current.innerHTML = value || '';

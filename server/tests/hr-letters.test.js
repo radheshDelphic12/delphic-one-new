@@ -298,3 +298,50 @@ describe('issuing letters', () => {
     expect((await authed(request(app).get(`${L}/templates`), access_token)).status).toBe(403);
   });
 });
+
+describe('letter text written in the rich-text editor', () => {
+  const rich = '<h2>Terms</h2><p>Dear {{employee_name}},</p><p><strong>Probation:</strong> three months. <em>CTC</em> {{ctc}}.</p><ul><li>one</li><li>two <u>under</u></li></ul><ol><li>first</li></ol><hr><p><a href="https://example.com/x">link</a></p><script>alert(1)</script>';
+  const pdfOf = (id) => authed(request(app).get(`${L}/${id}/pdf`), adminToken).buffer(true).parse((res, cb) => { const c = []; res.on('data', (d) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+
+  test('the template keeps the formatting, drops unsafe markup, and an empty editor is refused', async () => {
+    const ok = await offerTemplate({ body: rich });
+    expect(ok.status).toBe(201);
+    expect(ok.body.data.body).toContain('<strong>Probation:</strong>');
+    expect(ok.body.data.body).not.toContain('<script');
+    expect(ok.body.data.fields).toEqual(expect.arrayContaining(['employee_name', 'ctc']));
+    expect((await offerTemplate({ name: 'Blank', body: '<p><br></p>' })).status).toBe(422);
+  });
+
+  test('values typed at issue time are escaped; the issued letter keeps the formatting and the PDF is built from it', async () => {
+    const m = await employee('Asha <b>Rao</b>');
+    const t = (await offerTemplate({ body: rich })).body.data;
+    const input = { template_id: t.id, recipient: { type: 'employee', org_membership_id: m.id }, fields: { ctc: '12 <script>x</script> LPA' }, issued_on: '2026-11-11' };
+    const pre = await post('/preview', input);
+    expect(pre.status).toBe(200);
+    expect(pre.body.data.body).toContain('<strong>Probation:</strong>');
+    expect(pre.body.data.body).not.toMatch(/<script|<b>Rao/);
+    expect(pre.body.data.body).toContain('&lt;script&gt;');
+    const letter = await post('/', input);
+    expect(letter.status).toBe(201);
+    const pdf = await pdfOf(letter.body.data.id);
+    expect(pdf.status).toBe(200);
+    expect(pdf.body.slice(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.body.length).toBeGreaterThan(2500);
+  });
+
+  test('an older plain-text template still works as before', async () => {
+    const m = await employee('Asha Rao');
+    const t = (await offerTemplate()).body.data;
+    const letter = await post('/', { template_id: t.id, recipient: { type: 'employee', org_membership_id: m.id }, fields: { ctc: '9' } });
+    expect(letter.status).toBe(201);
+    expect((await pdfOf(letter.body.data.id)).status).toBe(200);
+  });
+
+  test('the HTML reader splits blocks, lists and styles', () => {
+    const { toBlocks } = require('../src/modules/letters/letters.html');
+    const b = toBlocks('<h2>Title</h2><p>a <strong>b</strong> <em>c</em></p><ul><li>x</li><li>y</li></ul><ol><li>1</li></ol><hr><blockquote><p>q</p></blockquote>');
+    expect(b.map((x) => x.kind === 'hr' ? 'hr' : x.tag + (x.list ? (x.list.ordered ? '#' : '*') + x.list.n : ''))).toEqual(expect.arrayContaining(['h2', 'p', 'li*1', 'li*2', 'li#1', 'hr']));
+    const p = b.find((x) => x.tag === 'p');
+    expect(p.runs.map((r) => [r.text.trim(), r.bold, r.italic])).toEqual(expect.arrayContaining([['b', true, false], ['c', false, true]]));
+  });
+});

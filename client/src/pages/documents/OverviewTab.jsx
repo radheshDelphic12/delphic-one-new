@@ -190,7 +190,7 @@ export default function OverviewTab() {
                   {row.items.map((it) => (
                     <td key={it.name} className="px-3 py-2" data-testid={it.state === 'uploaded' ? 'doc-on-file' : 'doc-missing'}>
                       {it.state === 'uploaded' ? (
-                        <button type="button" className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline" title={it.document?.label} onClick={() => open(it.document)}><CheckCircle2 className="h-4 w-4" />On file{it.document?.uploaded_at ? ` · ${it.document.uploaded_at}` : ''}</button>
+                        <button type="button" className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline" title={it.document?.via_project ? `${it.document.label} (uploaded on project ${it.document.via_project})` : it.document?.label} onClick={() => open(it.document)}><CheckCircle2 className="h-4 w-4" />On file{it.document?.uploaded_at ? ` · ${it.document.uploaded_at}` : ''}{it.document?.via_project ? ` · project ${it.document.via_project}` : ''}</button>
                       ) : (
                         <span className="inline-flex items-center gap-1.5">
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="Not uploaded"><HelpCircle className="h-3.5 w-3.5" />?</span>

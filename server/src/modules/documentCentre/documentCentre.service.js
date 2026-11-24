@@ -139,6 +139,30 @@ async function overview(orgId, query) {
   const byEntity = new Map();
   for (const d of docs) byEntity.set(d.entity_id, [...(byEntity.get(d.entity_id) || []), d]);
 
+  // clients: files uploaded on the client's projects (Finance > Projects > Client agreements) count as on file for the client too.
+  // A project points to its client by account, or (older projects) only by the client's name.
+  const projectLink = new Map(); // client id -> agreement link of one of its projects
+  if (kind === 'client' && ids.length) {
+    const projects = await prisma.account.findMany({
+      where: { org_id: orgId, is_project: true },
+      select: { id: true, name: true, project_name: true, client_name: true, client_account_id: true, client_agreement_url: true },
+    });
+    const clientByName = new Map(entities.map((e) => [norm(e.name), e.id]));
+    const owner = new Map(); // project id -> client id
+    for (const pr of projects) {
+      const clientId = pr.client_account_id && ids.includes(pr.client_account_id) ? pr.client_account_id : (!pr.client_account_id && pr.client_name ? clientByName.get(norm(pr.client_name)) : null);
+      if (clientId) owner.set(pr.id, { clientId, label: pr.project_name || pr.name, link: pr.client_agreement_url });
+    }
+    if (owner.size) {
+      const projectDocs = await prisma.document.findMany({ where: { entity_type: 'account', entity_id: { in: [...owner.keys()] } }, orderBy: { uploaded_at: 'desc' }, select: { id: true, entity_id: true, label: true, doc_type: true, file_url: true, uploaded_at: true } });
+      for (const d of projectDocs) {
+        const o = owner.get(d.entity_id);
+        byEntity.set(o.clientId, [...(byEntity.get(o.clientId) || []), { ...d, project: o.label }]);
+      }
+      for (const o of owner.values()) if (o.link && !projectLink.has(o.clientId)) projectLink.set(o.clientId, { url: o.link, label: o.label });
+    }
+  }
+
   // vendors: the month's invoices and whether each has a file
   let invoiceByVendor = new Map();
   if (kind === 'vendor' && ids.length) {
@@ -157,8 +181,10 @@ async function overview(orgId, query) {
     const mine = byEntity.get(e.id) || [];
     const items = reqs.map((name) => {
       const doc = mine.find((d) => matches(name, d));
-      if (doc) return { name, state: 'uploaded', document: { id: doc.id, label: doc.label, url: doc.file_url, uploaded_at: ymd(doc.uploaded_at) } };
+      if (doc) return { name, state: 'uploaded', document: { id: doc.id, label: doc.label, url: doc.file_url, uploaded_at: ymd(doc.uploaded_at), via_project: doc.project || null } };
       if (e.agreement_link && norm(name).includes('agreement')) return { name, state: 'uploaded', document: { id: null, label: 'Agreement link on the account', url: e.agreement_link, uploaded_at: null } };
+      const viaProject = projectLink.get(e.id);
+      if (viaProject && norm(name).includes('agreement')) return { name, state: 'uploaded', document: { id: null, label: 'Agreement link on the project', url: viaProject.url, uploaded_at: null, via_project: viaProject.label } };
       return { name, state: 'missing', document: null };
     });
     let invoices = null;

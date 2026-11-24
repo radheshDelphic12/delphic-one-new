@@ -9,6 +9,8 @@ import { apiErrorMessage } from '../../lib/alerts/apiErrorMessage.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
+import RichTextEditor from '../../components/ui/RichTextEditor.jsx';
+import RichTextView from '../../components/ui/RichTextView.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { confirmAction } from '../../lib/confirmAction.js';
 
@@ -183,7 +185,7 @@ function GenerateDrawer({ open, templates, onClose, onIssued }) {
             <div className="space-y-2 text-sm" data-testid="letter-preview">
               <p className="text-xs text-tertiary-500">Ref {preview.example_serial} · {preview.issued_on}{preview.office ? ` · ${preview.office.name}${preview.office.legal_name ? ` (${preview.office.legal_name})` : ''}` : ''}</p>
               {preview.subject && <p className="font-semibold">{preview.subject}</p>}
-              <p className="whitespace-pre-wrap leading-relaxed">{preview.body}</p>
+              <RichTextView value={preview.body} className="leading-relaxed" />
               {preview.missing.length > 0 && <p className="text-xs text-warning-700">Still to fill: {preview.missing.join(', ')}</p>}
             </div>
           )}
@@ -271,14 +273,25 @@ function exampleSerial(format, prefix) {
     .replace(/\{FY\}/g, `${start}-${String((start + 1) % 100).padStart(2, '0')}`).replace(/\{SEQ(?::\d{1,2})?\}/, '1'.padStart(width, '0'));
 }
 
+/** A template saved before the editor existed is plain text (blank line = new paragraph): shown in the editor as paragraphs. */
+const escapeHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const toEditorHtml = (text) => (/<[a-z][\s\S]*>/i.test(text || '') ? text : String(text || '').split(/\n{2,}/).filter((x) => x.trim() !== '').map((x) => `<p>${escapeHtml(x).replace(/\n/g, '<br>')}</p>`).join(''));
+const plainOf = (html) => String(html || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+
 function TemplateDrawer({ template, catalog, onClose, onSaved }) {
   const { pushError, pushSuccess } = useAlerts();
   const [v, setV] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
   const bodyRef = useRef(null);
+  const [loadKey, setLoadKey] = useState(0);
   const [newField, setNewField] = useState({ label: '', hint: '' });
   const open = template !== null;
-  useEffect(() => { if (template !== null) setV(template.id ? { ...EMPTY, ...Object.fromEntries(Object.entries(template).filter(([k]) => k in EMPTY).map(([k, x]) => [k, x ?? ''])) } : { ...EMPTY }); }, [template]);
+  useEffect(() => {
+    if (template === null) return;
+    const loaded = template.id ? { ...EMPTY, ...Object.fromEntries(Object.entries(template).filter(([k]) => k in EMPTY).map(([k, x]) => [k, x ?? ''])) } : { ...EMPTY };
+    setV({ ...loaded, body: toEditorHtml(loaded.body) });
+    setLoadKey((k) => k + 1); // the editor loads its text when this changes
+  }, [template]);
   const set = (k) => (e) => setV((c) => ({ ...c, [k]: e.target.value }));
 
   // The fields that fill themselves, the template's own fields, and names used in the text that are neither (they are still asked when issuing).
@@ -307,10 +320,9 @@ function TemplateDrawer({ template, catalog, onClose, onSaved }) {
   const removeField = (key) => setV((c) => ({ ...c, custom_fields: (c.custom_fields || []).filter((x) => x.key !== key) }));
 
   function insert(token) {
-    const el = bodyRef.current;
-    const at = el ? el.selectionStart : v.body.length;
-    setV((c) => ({ ...c, body: `${c.body.slice(0, at)}${token}${c.body.slice(at)}` }));
-    requestAnimationFrame(() => { if (el) { el.focus(); const p = at + token.length; el.setSelectionRange(p, p); } });
+    // at the caret of the letter text (the rich-text editor keeps its own selection)
+    if (bodyRef.current) bodyRef.current.insertText(token);
+    else setV((c) => ({ ...c, body: `${c.body}${token}` }));
   }
   async function save(e) {
     e.preventDefault();
@@ -327,7 +339,7 @@ function TemplateDrawer({ template, catalog, onClose, onSaved }) {
     <Drawer open={open} onClose={onClose} size="xl" tone={template?.id ? 'edit' : 'create'} title={template?.id ? 'Edit template' : 'New template'} footer={
       <>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="submit" form="letter-template-form" className="btn-primary" disabled={busy || !v.name.trim() || !v.body.trim()}>{busy ? 'Saving…' : 'Save template'}</button>
+        <button type="submit" form="letter-template-form" className="btn-primary" disabled={busy || !v.name.trim() || !plainOf(v.body)}>{busy ? 'Saving…' : 'Save template'}</button>
       </>
     }>
       <form id="letter-template-form" onSubmit={save} className="space-y-4" data-testid="template-form">
@@ -354,11 +366,11 @@ function TemplateDrawer({ template, catalog, onClose, onSaved }) {
         <label className={label}>Subject (optional)<input className={input} aria-label="Subject" value={v.subject} onChange={set('subject')} placeholder="Offer of employment - {{designation}}" /></label>
         <div>
           <label className={label}>Letter text
-            <textarea ref={bodyRef} required rows={12} className={input} aria-label="Letter text" value={v.body} onChange={set('body')} placeholder={'Dear {{employee_name}},\n\nWe are pleased to offer you ...'} />
           </label>
-          <p className="mt-1 text-[11px] text-tertiary-500">A blank line starts a new paragraph. Put {'{{field}}'} where a value goes. Fields from the record fill themselves; any other name you write (for example {'{{ctc}}'}) is asked for when the letter is issued.</p>
+          <div data-testid="letter-editor" aria-label="Letter text"><RichTextEditor apiRef={bodyRef} resetKey={loadKey} value={v.body} onChange={(html) => setV((c) => ({ ...c, body: html }))} minHeight="16rem" placeholder="Dear {{employee_name}}, ... use the toolbar for bold, headings and lists" /></div>
+          <p className="mt-1 text-[11px] text-tertiary-500">Format the text with the toolbar (bold, italic, underline, headings, lists, links). Put {'{{field}}'} where a value goes. Fields from the record fill themselves; any other name you write (for example {'{{ctc}}'}) is asked for when the letter is issued.</p>
           <div className="mt-1 flex flex-wrap gap-1" data-testid="field-chips">
-            {[...(catalog?.common || []), ...(catalog?.employee || []), ...(catalog?.recipient || [])].map((f) => <button key={f.key} type="button" title={`${f.label} (fills itself)`} className={chip} onClick={() => insert(`{{${f.key}}}`)}>{f.key}</button>)}
+            {[...(catalog?.common || []), ...(catalog?.employee || []), ...(catalog?.recipient || [])].map((f) => <button key={f.key} type="button" title={`${f.label} (fills itself)`} className={chip} onMouseDown={(e) => e.preventDefault()} onClick={() => insert(`{{${f.key}}}`)}>{f.key}</button>)}
           </div>
           <p className="mt-1 text-[11px] text-tertiary-500">The fields above fill themselves from the company or the person&apos;s record.</p>
 

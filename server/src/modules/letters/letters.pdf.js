@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const htmlText = require('./letters.html');
 
 // The PDF of an issued letter, drawn from the text stored on the letter (so it reads the same years later, whatever the template says now).
 // It is on the company letterhead: the logo at the top of every page, the issuing office under it on the first page, and the company's
@@ -121,9 +122,15 @@ function letterPdf(letter, { companyName = '', logo = null } = {}) {
     if (letter.subject) doc.fillColor(INK).font('Helvetica-Bold').fontSize(11).text(`Sub: ${letter.subject}`).moveDown(0.9);
 
     doc.fillColor(INK).font('Helvetica').fontSize(10.5);
-    for (const paragraph of String(letter.body).split(/\n{2,}/)) {
-      doc.text(paragraph, { align: 'left', lineGap: 3 });
-      doc.moveDown(0.8);
+    if (htmlText.isHtml(letter.body)) {
+      // written in the rich-text editor: bold, italic, underline, headings, lists, links, dividers
+      htmlText.drawBlocks(doc, letter.body, { ink: INK, blue: BLUE, line: LINE, left: MARGIN.left, width: CONTENT_WIDTH });
+      doc.fillColor(INK).font('Helvetica').fontSize(10.5);
+    } else {
+      for (const paragraph of String(letter.body).split(/\n{2,}/)) {
+        doc.text(paragraph, { align: 'left', lineGap: 3 });
+        doc.moveDown(0.8);
+      }
     }
 
     if (letter.signatory_name || letter.signatory_title) {

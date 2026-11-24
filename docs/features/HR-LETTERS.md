@@ -19,3 +19,6 @@ New permission module **Letters**: `letters.view` (read), `letters.create` (issu
 
 ## Not in this version
 Letterhead images and signatures (text signatory only), emailing the letter to the recipient, a letters list on the employee profile page, approval before issue. The company address is not stored on the company, so use `{{company_address}}` only if HR types it.
+
+## Rich-text letters (2026-11-24)
+The template "Letter text" is a rich-text editor (bold, italic, underline, headings, lists, links, divider, quote). It is stored as sanitised HTML (`lib/richText.js`); values typed at issue time are HTML-escaped when filled in; the PDF draws the formatting (`letters.html.js`). Templates saved before this are plain text and still work (shown in the editor as paragraphs; the PDF keeps the old path for them).
