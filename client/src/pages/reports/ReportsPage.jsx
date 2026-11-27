@@ -50,6 +50,7 @@ import JoiningAttrition from './JoiningAttrition.jsx';
 import ClosureMatrix from './ClosureMatrix.jsx';
 import AiInterviewReport from './AiInterviewReport.jsx';
 import DaySchedule from './DaySchedule.jsx';
+import ContactGaps from './ContactGaps.jsx';
 import {
   agingSections,
   chartBarsForReport,
@@ -325,6 +326,7 @@ const OWN_SCREENS = {
   'vendor-joinings': () => <ClosureMatrix kind="vendor" />,
   'ai-interviews': AiInterviewReport,
   'day-schedule': DaySchedule,
+  'contact-gaps': ContactGaps,
 };
 
 export default function ReportsPage() {

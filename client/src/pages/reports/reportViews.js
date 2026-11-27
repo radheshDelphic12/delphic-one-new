@@ -27,6 +27,7 @@ export const ALL_REPORTS = [
   { key: 'vendor-joinings', label: 'Vendor-wise joinings', roles: ['admin', 'sales', 'bda'] },
   { key: 'ai-interviews', label: 'AI interviews', roles: ['admin', 'sales', 'recruiter'] },
   { key: 'day-schedule', label: 'Day schedule (24h)', roles: ['admin', 'sales', 'bda', 'recruiter'] },
+  { key: 'contact-gaps', label: 'Missing contact details', roles: ['admin', 'sales', 'bda'] },
   { key: 'monthly-review', label: 'Monthly performance review', roles: ['admin'] },
   { key: 'joinings', label: 'Joinings', roles: ['admin', 'sales'] },
   { key: 'time-to-submit', label: 'Time to submit', roles: ['admin', 'sales'] },

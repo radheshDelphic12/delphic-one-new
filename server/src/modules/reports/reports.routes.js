@@ -295,6 +295,12 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await closureMatrixService.closureRecords(req.user.org_id, req.query)))
 );
 
+// Clients and vendors whose point of contact has no phone or email (Reports > Missing contact details)
+router.get('/contact-gaps', authorize('admin', 'sales', 'bda'), asyncHandler(async (req, res) => {
+  const type = ['client', 'vendor'].includes(req.query.type) ? req.query.type : undefined;
+  return ok(res, await require('./contactGaps.service').contactGaps(req.user.org_id, { type, stage: req.query.stage === 'active' ? 'active' : undefined }));
+}));
+
 router.get(
   '/day-schedule',
   authorize('admin', 'sales', 'bda', 'recruiter'),

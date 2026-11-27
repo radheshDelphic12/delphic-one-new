@@ -15,16 +15,16 @@ assert.ok(!reportsForRole('recruiter').some((r) => r.key === 'pipeline-explorer'
 // Visible dropdown reports per role.
 assert.deepEqual(
   reportsForRole('admin').map((r) => r.key).sort(),
-  ['bda-reports', 'clients-without-requirements', 'hiring-funnel', 'hr', 'joinings', 'monthly-review', 'recruiter-vendor-gaps', 'sales-reports', 'time-to-submit']
+  ['ai-interviews', 'bda-reports', 'client-wins', 'clients-without-requirements', 'contact-gaps', 'day-schedule', 'hiring-funnel', 'hr', 'joining-attrition', 'joinings', 'monthly-review', 'recruiter-vendor-gaps', 'sales-reports', 'time-to-submit', 'vendor-joinings']
 );
-assert.deepEqual(reportsForRole('bda').map((r) => r.key).sort(), ['bda-reports', 'clients-without-requirements']);
-assert.deepEqual(reportsForRole('recruiter').map((r) => r.key).sort(), ['recruiter-vendor-gaps']);
+assert.deepEqual(reportsForRole('bda').map((r) => r.key).sort(), ['bda-reports', 'client-wins', 'clients-without-requirements', 'contact-gaps', 'day-schedule', 'vendor-joinings']);
+assert.deepEqual(reportsForRole('recruiter').map((r) => r.key).sort(), ['ai-interviews', 'day-schedule', 'recruiter-vendor-gaps']);
 // Recruiter reports is hidden for now but stays defined (re-enable by dropping `hidden: true`).
 assert.ok(ALL_REPORTS.some((r) => r.key === 'recruiter-reports'));
 assert.ok(!reportsForRole('admin').some((r) => r.key === 'recruiter-reports'));
 assert.deepEqual(
   reportsForRole('sales').map((r) => r.key).sort(),
-  ['clients-without-requirements', 'joinings', 'sales-reports', 'time-to-submit']
+  ['ai-interviews', 'client-wins', 'clients-without-requirements', 'contact-gaps', 'day-schedule', 'joinings', 'sales-reports', 'time-to-submit', 'vendor-joinings']
 );
 
 const columns = columnsForReport('pipeline-explorer');
