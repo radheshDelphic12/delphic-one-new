@@ -204,6 +204,8 @@ const crossTeams = require('./modules/crossTeams/crossTeams.routes');
 app.use('/api/v1/group-teams', crossTeams.group);
 app.use('/api/v1/cross-teams', crossTeams.company);
 app.use('/api/v1/seating', require('./modules/seating/seating.routes'));
+app.use('/api/v1/group-directory', require('./modules/groupDirectory/groupDirectory.routes'));
+app.use('/api/v1/group-marketing', require('./modules/groupMarketing/groupMarketing.routes'));
 app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/storage', storageRoutes);
 app.use('/api/v1/letters', lettersRoutes);

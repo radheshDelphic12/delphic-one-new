@@ -171,6 +171,8 @@ const RULES = [
   [/^\/superadmin\/whoami$/, 'open'], // the route itself is Super Admin only (authorizeSuperadmin); the snapshot viewer calls it
   [/^\/(group-cash|super-dashboard|hiring|group-offices|group-companies|group-tax|storage)(\/|$)/, 'admin'],
   [/^\/group-teams(\/|$)/, 'admin'], // group superadmin (the route checks)
+  [/^\/group-directory(\/|$)/, 'admin'], // group superadmin (the route checks)
+  [/^\/group-marketing(\/|$)/, 'admin'], // group superadmin (the route checks)
   [/^\/seating(\/|$)/, { GET: ['people.view', 'hr_settings.view', 'hr_settings.update'], '*': 'hr_settings.update' }], // People > Seating
   [/^\/cross-teams(\/|$)/, { GET: 'open', '*': 'people.update' }], // the teams of the company; setting an employee's teams needs People > Edit
   // Group Travel > client deployments, the door for everyone else (/deployments): a person's own deployments, onsite logs and expenses,
