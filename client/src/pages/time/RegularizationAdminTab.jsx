@@ -33,6 +33,9 @@ export default function RegularizationAdminTab({ onPendingChange }) {
   const [rows, setRows] = useState([]);
   const [pending, setPending] = useState({ attendance: 0, timesheets: 0 });
   const [loading, setLoading] = useState(true);
+  // several pending requests can be approved or rejected in one go
+  const [selected, setSelected] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +48,7 @@ export default function RegularizationAdminTab({ onPendingChange }) {
         apiClient.get('/timesheets/regularization-tickets', { params: { status: 'pending' } }),
       ]);
       setRows(kind === 'attendance' ? a.data.data || [] : t.data.data || []);
+      setSelected([]);
       const counts = { attendance: (pa.data.data || []).length, timesheets: (pt.data.data || []).length };
       setPending(counts);
       if (onPendingChange) onPendingChange(counts.attendance + counts.timesheets);
@@ -73,7 +77,35 @@ export default function RegularizationAdminTab({ onPendingChange }) {
     }
   }
 
+  const decisionUrl = (id) => (kind === 'attendance' ? `/attendance/regularization-requests/${id}/decision` : `/timesheets/regularization-tickets/${id}/decision`);
+  const pendingIds = rows.filter((r) => r.status === 'pending').map((r) => r.id);
+  const allPicked = pendingIds.length > 0 && pendingIds.every((id) => selected.includes(id));
+  const toggle = (id) => setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  async function decideSelected(decision) {
+    let reason;
+    if (decision === 'rejected') {
+      reason = await promptAction(`Reason for rejecting the ${selected.length} selected request${selected.length === 1 ? '' : 's'} (optional):`);
+      if (reason === null) return;
+    }
+    setBulkBusy(true);
+    let done = 0;
+    const failed = [];
+    for (const id of selected) {
+      try { await apiClient.post(decisionUrl(id), { status: decision, decision_reason: reason || undefined }); done += 1; } catch (err) { failed.push(apiErrorMessage(err, 'failed')); }
+    }
+    setBulkBusy(false);
+    if (done) pushSuccess(`${done} request${done === 1 ? '' : 's'} ${decision}`);
+    if (failed.length) pushError(`${failed.length} could not be ${decision}: ${[...new Set(failed)].join('; ')}`, 'Some were not applied');
+    load();
+  }
+  const pickColumn = {
+    key: 'pick',
+    header: <input type="checkbox" aria-label="Select all pending" data-testid="regularization-select-all" checked={allPicked} disabled={!pendingIds.length} onChange={() => setSelected(allPicked ? [] : pendingIds)} />,
+    render: (r) => (r.status === 'pending' ? <input type="checkbox" aria-label="Select request" data-testid="regularization-select" checked={selected.includes(r.id)} onChange={() => toggle(r.id)} /> : null),
+  };
+
   const attendanceColumns = [
+    pickColumn,
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-tertiary-900">{r.employee || 'Unknown'}</span> },
     { key: 'date', header: 'Date', render: (r) => r.date },
     { key: 'want', header: 'Requested', render: (r) => <span className="capitalize">{label(r.requested_status)}{r.check_in_time ? ` (${r.check_in_time}${r.check_out_time ? ` - ${r.check_out_time}` : ''})` : ''}</span> },
@@ -83,6 +115,7 @@ export default function RegularizationAdminTab({ onPendingChange }) {
     { key: 'actions', header: '', render: (r) => <Actions row={r} onDecide={decide} /> },
   ];
   const timesheetColumns = [
+    pickColumn,
     { key: 'employee', header: 'Employee', render: (r) => <span className="font-medium text-tertiary-900">{r.org_membership?.person?.name || r.requester?.name || 'Unknown'}</span> },
     { key: 'date', header: 'Date', render: (r) => String(r.date || r.timesheet_entry?.date || '').slice(0, 10) || '-' },
     { key: 'project', header: 'Project', render: (r) => r.account?.project_name || r.account?.name || r.timesheet_entry?.account?.project_name || r.timesheet_entry?.account?.name || '-' },
@@ -115,6 +148,15 @@ export default function RegularizationAdminTab({ onPendingChange }) {
           </label>
         </div>
       </div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-100 bg-primary-50/50 px-3 py-2 text-sm" data-testid="regularization-bulk-bar">
+          <span className="font-medium text-tertiary-800">{selected.length} selected</span>
+          <button type="button" className="btn-primary px-3 py-1 text-xs" disabled={bulkBusy} onClick={() => decideSelected('approved')} data-testid="regularization-bulk-approve">Approve selected</button>
+          <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={bulkBusy} onClick={() => decideSelected('rejected')} data-testid="regularization-bulk-reject">Reject selected</button>
+          <button type="button" className="btn-ghost text-xs" onClick={() => setSelected([])}>Clear</button>
+          {bulkBusy && <span className="text-xs text-tertiary-500">Working...</span>}
+        </div>
+      )}
       <DataTable
         columns={kind === 'attendance' ? attendanceColumns : timesheetColumns}
         rows={rows}
