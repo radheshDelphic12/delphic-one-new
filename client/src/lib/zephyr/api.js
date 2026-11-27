@@ -127,6 +127,7 @@ export const zephyrApi = {
   updateValuation: (id, vid, body) => apiClient.patch(`/zephyr/properties/${id}/valuations/${vid}`, body).then(unwrap),
   deleteValuation: (id, vid) => apiClient.delete(`/zephyr/properties/${id}/valuations/${vid}`).then(unwrap),
   // Purchase timeline (planned steps of buying a property)
+  purchaseTimeline: () => apiClient.get('/zephyr/properties/purchase-timeline').then(unwrap),
   addPurchaseStep: (id, body) => apiClient.post(`/zephyr/properties/${id}/purchase-steps`, body).then(unwrap),
   addDefaultPurchaseSteps: (id) => apiClient.post(`/zephyr/properties/${id}/purchase-steps/defaults`, {}).then(unwrap),
   updatePurchaseStep: (id, sid, body) => apiClient.patch(`/zephyr/properties/${id}/purchase-steps/${sid}`, body).then(unwrap),

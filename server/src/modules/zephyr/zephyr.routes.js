@@ -656,6 +656,7 @@ const pCtx = (req) => ({ isAdmin: req.zx.role === 'admin', canFinance: req.zx.ca
 const sendProperty = (res, result, status = 200) => (result.error ? failProperty(res, result) : ok(res, result.property, {}, status));
 
 router.get('/units/rentable', zxAuthorize('rent'), asyncHandler(async (req, res) => ok(res, await properties.rentableUnits(orgId(req)))));
+router.get('/properties/purchase-timeline', pView, asyncHandler(async (req, res) => ok(res, await require('./purchaseSteps.service').timeline(orgId(req), pCtx(req)))));
 router.get('/properties/summary', pView, asyncHandler(async (req, res) => ok(res, await properties.summary(orgId(req), pCtx(req)))));
 router.get('/properties', pView, asyncHandler(async (req, res) => ok(res, await properties.list(orgId(req), pCtx(req), properties.listQuerySchema.parse(req.query)))));
 router.post('/properties', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.create(orgId(req), req.user.id, pCtx(req), properties.createPropertySchema.parse(req.body)), 201)));

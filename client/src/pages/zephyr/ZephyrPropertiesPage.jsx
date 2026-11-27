@@ -12,6 +12,7 @@ import DataTable from '../../components/ui/DataTable.jsx';
 import Drawer from '../../components/ui/Drawer.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import SectionTabs from '../../components/ui/SectionTabs.jsx';
+import ZephyrPurchaseTimeline from './ZephyrPurchaseTimeline.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { Section, inputCls, labelCls, toBody, useDebounced, dayOf, Empty } from '../../components/zephyr/formKit.jsx';
 
@@ -165,7 +166,7 @@ export default function ZephyrPropertiesPage() {
       : []),
   ];
   const filtered = Object.values(filters).some(Boolean) || Boolean(dq);
-  const tabs = [{ key: 'portfolio', label: 'Portfolio' }, ...(canTrade ? [{ key: 'sales', label: 'Sales (property trading)' }] : [])];
+  const tabs = [{ key: 'portfolio', label: 'Portfolio' }, { key: 'purchase-timeline', label: 'Purchase timeline' }, ...(canTrade ? [{ key: 'sales', label: 'Sales (property trading)' }] : [])];
 
   return (
     <div className="mt-4 space-y-4">
@@ -206,6 +207,8 @@ export default function ZephyrPropertiesPage() {
           <DataTable columns={columns} rows={rows} loading={fetching && rows.length === 0} emptyLabel={filtered ? 'No properties match these filters' : 'No properties yet. Add the first one.'} onRowClick={(r) => navigate(`/zephyr/properties/${r.id}`)} maxHeight="62vh" />
         </>
       )}
+
+      {tab === 'purchase-timeline' && <ZephyrPurchaseTimeline canFinance={canFinance} />}
 
       {tab === 'sales' && canTrade && (
         <div className="space-y-3">

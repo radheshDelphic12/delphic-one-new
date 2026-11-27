@@ -73,4 +73,36 @@ async function removeStep(orgId, propertyId, stepId) {
   return done.count ? { ok: true } : { error: 'not_found' };
 }
 
-module.exports = { DEFAULT_STEPS, stepSchema, stepUpdateSchema, stepsFor, addStep, addDefaultSteps, updateStep, removeStep };
+/**
+ * Every property's purchase on one timeline (Zephyr > Properties > Purchase timeline): the purchase date, the planned steps (planned /
+ * done dates) and, for finance, the purchase cost and each acquisition cost paid with its date. Sorted by date; the screen sorts and charts it.
+ */
+async function timeline(orgId, ctx) {
+  const props = await prisma.zxProperty.findMany({ where: { org_id: orgId, deleted_at: null }, select: { id: true, code: true, name: true, status: true, purchase_date: true, purchase_cost: true }, orderBy: { code: 'asc' } });
+  const ids = props.map((p) => p.id);
+  const [steps, costs] = await Promise.all([
+    prisma.zxPropertyPurchaseStep.findMany({ where: { org_id: orgId, property_id: { in: ids } } }),
+    ctx.canFinance ? prisma.zxLedgerEntry.findMany({ where: { org_id: orgId, property_id: { in: ids }, source_type: 'property_acquisition', deleted_at: null }, select: { property_id: true, entry_date: true, amount: true, service_type: true, reference: true } }) : [],
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const byId = new Map(props.map((p) => [p.id, p]));
+  const prop = (id) => { const p = byId.get(id); return { id: p.id, code: p.code, name: p.name, status: p.status }; };
+  const events = [];
+  for (const p of props) {
+    if (p.purchase_date) events.push({ property: prop(p.id), date: ymd(p.purchase_date), kind: 'purchase', title: 'Purchased', state: 'done', ...(ctx.canFinance ? { amount: Number(p.purchase_cost) || null } : {}) });
+  }
+  for (const st of steps) {
+    const planned = ymd(st.planned_date); const done = ymd(st.done_date);
+    const state = done ? 'done' : !planned ? 'no_date' : planned < today ? 'late' : 'upcoming';
+    const date = done || planned;
+    if (!date) continue;
+    events.push({ property: prop(st.property_id), date, planned_date: planned, done_date: done, kind: 'step', title: st.title, state, ...(ctx.canFinance ? { amount: st.amount == null ? null : Number(st.amount) } : {}) });
+  }
+  for (const c of costs) {
+    events.push({ property: prop(c.property_id), date: ymd(c.entry_date), kind: 'payment', title: `${String(c.service_type || 'cost').replace(/_/g, ' ')} paid${c.reference ? ` (${c.reference})` : ''}`, state: 'done', amount: Number(c.amount) });
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.property.code.localeCompare(b.property.code));
+  return { events, properties: props.map((p) => ({ id: p.id, code: p.code, name: p.name, purchase_date: ymd(p.purchase_date) })) };
+}
+
+module.exports = { timeline, DEFAULT_STEPS, stepSchema, stepUpdateSchema, stepsFor, addStep, addDefaultSteps, updateStep, removeStep };

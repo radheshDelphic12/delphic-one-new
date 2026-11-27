@@ -51,3 +51,22 @@ test('steps with planned and done dates; a step past its date and not done is la
   // the property page carries the steps
   expect((await a.get(`/properties/${id}`)).body.data.purchase_steps.length).toBe(n);
 });
+
+test('all properties on one timeline: purchase date, steps and payments, sorted by date', async () => {
+  const a = api(ctx.adminToken);
+  const p1 = (await a.post('/properties', { name: 'Plot One', property_type: 'plot', purchase_date: '2026-03-10', purchase_cost: 500000 })).body.data;
+  const p2 = (await a.post('/properties', { name: 'Shop Two', property_type: 'shops' })).body.data;
+  await a.post(`/properties/${p2.id}/purchase-steps`, { title: 'Token', planned_date: '2026-02-01', done_date: '2026-02-03', amount: 10000 });
+  await a.post(`/properties/${p2.id}/purchase-steps`, { title: 'Registration', planned_date: '2099-01-01' });
+  await a.post(`/properties/${p1.id}/acquisition-costs`, { cost_type: 'registration', amount: 25000, entry_date: '2026-03-15', payment_mode: 'bank' });
+  const t = (await a.get('/properties/purchase-timeline')).body.data;
+  expect(t.events.map((e) => [e.date, e.kind, e.property.name])).toEqual([
+    ['2026-02-03', 'step', 'Shop Two'],
+    ['2026-03-10', 'purchase', 'Plot One'],
+    ['2026-03-15', 'payment', 'Plot One'],
+    ['2099-01-01', 'step', 'Shop Two'],
+  ]);
+  expect(t.events[1].amount).toBe(500000);
+  expect(t.events[3].state).toBe('upcoming');
+  expect(t.properties).toHaveLength(2);
+});
