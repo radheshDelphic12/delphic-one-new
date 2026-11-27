@@ -682,6 +682,13 @@ router.patch('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, r
 router.delete('/properties/:id/valuations/:vid', pFin, asyncHandler(async (req, res) => sendProperty(res, await properties.removeValuation(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.vid))));
 router.patch('/properties/:id/events/:eid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.updateEvent(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid, properties.eventSchema.omit({ unit_id: true }).partial().parse(req.body)))));
 router.delete('/properties/:id/events/:eid', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.removeEvent(orgId(req), req.user.id, pCtx(req), req.params.id, req.params.eid))));
+// Purchase timeline: the planned steps of buying a property
+const purchaseSteps = require('./purchaseSteps.service');
+const stepThen = async (req, res, result) => (result.error ? failProperty(res, result) : sendProperty(res, await properties.get(orgId(req), pCtx(req), req.params.id)));
+router.post('/properties/:id/purchase-steps/defaults', pEdit, asyncHandler(async (req, res) => stepThen(req, res, await purchaseSteps.addDefaultSteps(orgId(req), req.user.id, req.params.id))));
+router.post('/properties/:id/purchase-steps', pEdit, asyncHandler(async (req, res) => stepThen(req, res, await purchaseSteps.addStep(orgId(req), req.user.id, pCtx(req), req.params.id, purchaseSteps.stepSchema.parse(req.body || {})))));
+router.patch('/properties/:id/purchase-steps/:sid', pEdit, asyncHandler(async (req, res) => stepThen(req, res, await purchaseSteps.updateStep(orgId(req), pCtx(req), req.params.id, req.params.sid, purchaseSteps.stepUpdateSchema.parse(req.body || {})))));
+router.delete('/properties/:id/purchase-steps/:sid', pEdit, asyncHandler(async (req, res) => stepThen(req, res, await purchaseSteps.removeStep(orgId(req), req.params.id, req.params.sid))));
 router.post('/properties/:id/events', pEdit, asyncHandler(async (req, res) => sendProperty(res, await properties.addNote(orgId(req), req.user.id, pCtx(req), req.params.id, properties.eventSchema.parse(req.body)), 201)));
 
 // --- Tenants, leases, rent (R4) ---

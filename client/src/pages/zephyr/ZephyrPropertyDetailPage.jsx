@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Banknote, Building2, FileText, History, KeyRound, Landmark, Layers, Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, CalendarClock, FileText, History, KeyRound, Landmark, Layers, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { useAlerts } from '../../lib/alerts/alertContext.jsx';
 import { zephyrApi, zephyrError } from '../../lib/zephyr/api.js';
 import { useZephyr, zxCan } from '../../lib/zephyr/useZephyr.js';
@@ -164,9 +164,78 @@ const TABS = [
   { key: 'leases', label: 'Tenants & leases', icon: Users },
   { key: 'rent', label: 'Rent', icon: KeyRound },
   { key: 'finance', label: 'Finance', icon: Landmark },
+  { key: 'purchase', label: 'Purchase timeline', icon: CalendarClock },
   { key: 'timeline', label: 'Timeline', icon: History },
   { key: 'documents', label: 'Documents', icon: FileText },
 ];
+
+const STEP_STATE = { done: ['green', 'Done'], late: ['red', 'Late'], upcoming: ['blue', 'Planned'], no_date: ['gray', 'No date yet'] };
+
+/** The plan for buying the property: steps with a planned date and, once it happens, the done date. Late steps stand out. */
+function PurchaseTimelineTab({ property, canEdit, canFinance, run }) {
+  const empty = { title: '', planned_date: '', done_date: '', amount: '', notes: '' };
+  const [form, setForm] = useState(empty);
+  const [editing, setEditing] = useState(null);
+  const steps = property.purchase_steps || [];
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const body = () => ({ title: form.title.trim(), planned_date: form.planned_date || null, done_date: form.done_date || null, notes: form.notes.trim() || null, ...(canFinance ? { amount: form.amount === '' ? null : Number(form.amount) } : {}) });
+  async function save(e) {
+    e.preventDefault();
+    const ok = await run(() => (editing ? zephyrApi.updatePurchaseStep(property.id, editing.id, body()) : zephyrApi.addPurchaseStep(property.id, body())), editing ? 'Step saved' : 'Step added');
+    if (ok) { setForm(empty); setEditing(null); }
+  }
+  const late = steps.filter((s) => s.state === 'late').length;
+  const done = steps.filter((s) => s.state === 'done').length;
+  const next = steps.find((s) => s.state === 'upcoming' || s.state === 'late');
+  const plural = (n) => (n === 1 ? '' : 's');
+  return (
+    <div className="space-y-3" data-testid="purchase-timeline">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-tertiary-600">{steps.length ? `${done} of ${steps.length} steps done${late ? ` · ${late} late` : ''}${next ? ` · next: ${next.title}${next.planned_date ? ` (${dateLabel(next.planned_date)})` : ''}` : ''}` : 'Plan the purchase: the steps and the date each should happen by.'}</p>
+        {canEdit && <button type="button" className="btn-secondary inline-flex items-center gap-1.5" data-testid="purchase-steps-defaults" onClick={() => run(() => zephyrApi.addDefaultPurchaseSteps(property.id), 'The usual steps were added')}><Plus className="h-4 w-4" />Add the usual steps</button>}
+      </div>
+      {steps.length === 0 ? <Empty>No purchase steps yet.</Empty> : (
+        <ol className="relative space-y-3 border-l-2 border-primary-100 pl-5">
+          {steps.map((s) => {
+            const [tone, label] = STEP_STATE[s.state];
+            return (
+              <li key={s.id} className="relative" data-testid="purchase-step">
+                <span className={`absolute -left-[1.6rem] top-1 h-3 w-3 rounded-full border-2 border-white ${s.state === 'done' ? 'bg-success-500' : s.state === 'late' ? 'bg-danger-500' : 'bg-primary-400'}`} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-tertiary-900">{s.title}</span>
+                  <Pill tone={tone}>{s.state === 'late' ? `Late by ${s.days_late} day${plural(s.days_late)}` : label}</Pill>
+                  {s.amount != null && canFinance && <span className="text-xs text-tertiary-600">{rupees(s.amount)}</span>}
+                </div>
+                <div className="text-xs text-tertiary-500">Planned {s.planned_date ? dateLabel(s.planned_date) : 'not set'}{s.done_date ? ` · done ${dateLabel(s.done_date)}${s.done_vs_plan_days ? ` (${Math.abs(s.done_vs_plan_days)} day${plural(Math.abs(s.done_vs_plan_days))} ${s.done_vs_plan_days > 0 ? 'late' : 'early'})` : ''}` : ''}</div>
+                {s.notes && <div className="text-xs text-tertiary-500">{s.notes}</div>}
+                {canEdit && (
+                  <div className="mt-1 flex gap-3 text-xs">
+                    {!s.done_date && <button type="button" className="font-medium text-success-700 hover:underline" onClick={() => run(() => zephyrApi.updatePurchaseStep(property.id, s.id, { done_date: today() }), 'Marked done')}>Mark done today</button>}
+                    <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => { setEditing(s); setForm({ title: s.title, planned_date: s.planned_date || '', done_date: s.done_date || '', amount: s.amount ?? '', notes: s.notes || '' }); }}>Edit</button>
+                    <button type="button" className="font-medium text-danger-600 hover:underline" onClick={async () => { if (await confirmAction(`Remove the step "${s.title}"?`)) run(() => zephyrApi.deletePurchaseStep(property.id, s.id), 'Step removed'); }}>Remove</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {canEdit && (
+        <form onSubmit={save} className={`${card} grid gap-2 sm:grid-cols-6`} data-testid="purchase-step-form">
+          <label className={`${labelCls} sm:col-span-2`}>{editing ? 'Edit step' : 'Add a step'}<input className={inputCls} value={form.title} onChange={set('title')} placeholder="e.g. Registration" required /></label>
+          <label className={labelCls}>Planned by<input type="date" className={inputCls} value={form.planned_date} onChange={set('planned_date')} /></label>
+          <label className={labelCls}>Done on<input type="date" className={inputCls} value={form.done_date} onChange={set('done_date')} /></label>
+          {canFinance && <label className={labelCls}>Amount (₹)<input type="number" min="0" className={inputCls} value={form.amount} onChange={set('amount')} /></label>}
+          <label className={labelCls}>Notes<input className={inputCls} value={form.notes} onChange={set('notes')} /></label>
+          <div className="flex items-end gap-2 sm:col-span-6">
+            <button type="submit" className="btn-primary">{editing ? 'Save step' : 'Add step'}</button>
+            {editing && <button type="button" className="btn-secondary" onClick={() => { setEditing(null); setForm(empty); }}>Cancel</button>}
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
 
 function RentTab({ property, canEdit, people, onChanged }) {
   const { pushError, pushSuccess } = useAlerts();
@@ -586,6 +655,8 @@ export default function ZephyrPropertyDetailPage() {
           )}
         </div>
       )}
+
+      {tab === 'purchase' && <PurchaseTimelineTab property={p} canEdit={canEdit} canFinance={canFinance} run={run} />}
 
       {tab === 'timeline' && (
         <div className="space-y-3">

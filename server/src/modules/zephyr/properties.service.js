@@ -276,6 +276,8 @@ async function get(orgId, ctx, id) {
   const extra = {
     units: unitOut,
     events: events.map((e) => ({ ...e, amount: num(e.amount) })),
+    // the plan for buying it (Purchase timeline): steps with planned and done dates
+    purchase_steps: await require('./purchaseSteps.service').stepsFor(orgId, id, ctx),
     ...(ctx.canFinance
       ? {
           loans: loanOut,

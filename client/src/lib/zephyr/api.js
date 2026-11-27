@@ -126,6 +126,11 @@ export const zephyrApi = {
   addValuation: (id, body) => apiClient.post(`/zephyr/properties/${id}/valuations`, body).then(unwrap),
   updateValuation: (id, vid, body) => apiClient.patch(`/zephyr/properties/${id}/valuations/${vid}`, body).then(unwrap),
   deleteValuation: (id, vid) => apiClient.delete(`/zephyr/properties/${id}/valuations/${vid}`).then(unwrap),
+  // Purchase timeline (planned steps of buying a property)
+  addPurchaseStep: (id, body) => apiClient.post(`/zephyr/properties/${id}/purchase-steps`, body).then(unwrap),
+  addDefaultPurchaseSteps: (id) => apiClient.post(`/zephyr/properties/${id}/purchase-steps/defaults`, {}).then(unwrap),
+  updatePurchaseStep: (id, sid, body) => apiClient.patch(`/zephyr/properties/${id}/purchase-steps/${sid}`, body).then(unwrap),
+  deletePurchaseStep: (id, sid) => apiClient.delete(`/zephyr/properties/${id}/purchase-steps/${sid}`).then(unwrap),
   addPropertyEvent: (id, body) => apiClient.post(`/zephyr/properties/${id}/events`, body).then(unwrap),
   updatePropertyEvent: (id, eid, body) => apiClient.patch(`/zephyr/properties/${id}/events/${eid}`, body).then(unwrap),
   deletePropertyEvent: (id, eid) => apiClient.delete(`/zephyr/properties/${id}/events/${eid}`).then(unwrap),

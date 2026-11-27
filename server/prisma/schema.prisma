@@ -4728,6 +4728,25 @@ model ZxPropertyValuation {
   @@map("zx_property_valuations")
 }
 
+// The planned timeline for buying a property: steps (token, agreement, payments, registration, possession ...) with planned and done dates.
+model ZxPropertyPurchaseStep {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id       String    @db.Uuid
+  property_id  String    @db.Uuid
+  title        String
+  planned_date DateTime? @db.Date
+  done_date    DateTime? @db.Date
+  amount       Decimal?  @db.Decimal(16, 2)
+  notes        String?
+  sort_order   Int       @default(0)
+  created_by   String?   @db.Uuid
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  @@index([org_id, property_id])
+  @@map("zx_property_purchase_steps")
+}
+
 model ZxPropertyEvent {
   id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id      String     @db.Uuid
