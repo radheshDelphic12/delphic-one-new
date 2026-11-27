@@ -10392,6 +10392,32 @@ model VendorPortalInvoice {
   @@map("vendor_portal_invoices")
 }
 
+// Finance > Credit notes: a numbered credit to a client (or from a vendor) of an amount, optionally against one invoice, which then has that
+// much less to pay. party_type: client | vendor; invoice_kind: client_invoice | vendor_invoice; status: issued | cancelled.
+model CreditNote {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String    @db.Uuid
+  number        String
+  party_type    String
+  account_id    String    @db.Uuid
+  invoice_kind  String?
+  invoice_id    String?   @db.Uuid
+  issue_date    DateTime  @db.Date
+  amount        Decimal   @db.Decimal(14, 2)
+  currency      String    @default("INR")
+  reason        String
+  status        String    @default("issued")
+  cancel_reason String?
+  cancelled_at  DateTime?
+  created_by    String    @db.Uuid
+  created_at    DateTime  @default(now())
+
+  @@unique([org_id, number])
+  @@index([org_id, party_type])
+  @@index([invoice_id])
+  @@map("credit_notes")
+}
+
 // A vendor resource marked paid for a month on the Payment Tracker (the vendor payment itself is one row per vendor and month).
 model VendorResourcePayment {
   id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

@@ -24,11 +24,13 @@ function dueOf(row) {
 }
 
 /** What the invoice list / page shows about payments: paid, pending and paid / partly paid / unpaid. */
-function withPayments(invoice, total) {
+function withPayments(invoice, total, credited = 0) {
   // An invoice marked paid before payments were recorded has no payment rows: it counts as fully paid, not as pending.
-  const due = invoice.total_amount !== undefined && invoice.total_amount !== null ? invoice.total_amount : invoice.amount;
+  // Credit notes issued against it (Finance > Credit notes) lower what is still to be paid.
+  const full = invoice.total_amount !== undefined && invoice.total_amount !== null ? invoice.total_amount : invoice.amount;
+  const due = credited ? money(D(full).minus(credited)) : full;
   const paid = invoice.status === 'paid' && total.count === 0 ? D(due) : total.paid;
-  const summary = payments.summarize(due, paid);
+  const summary = { ...payments.summarize(due, paid), credited_amount: money(D(credited || 0)) };
   // A paid invoice is closed: what it was settled with is not chased again (older invoices were settled on the amount before GST / TDS).
   if (invoice.status === 'paid') return { ...invoice, ...summary, pending_amount: money(calc.ZERO), payment_status: 'paid', payments_count: total.count };
   return { ...invoice, ...summary, payments_count: total.count };
@@ -51,7 +53,9 @@ async function record(orgId, user, invoiceId, input) {
   const frozen = await financialLock.assertOpen(orgId, invoice.period_month, invoice.period_year);
   if (frozen) return frozen;
 
-  const due = dueOf(invoice);
+  // what is still to be paid: the payable total less any credit notes on this invoice
+  const credited = await require('./creditNotes.service').creditedOf(orgId, KIND, invoiceId);
+  const due = dueOf(invoice) - credited;
   const paid = await paidOf(orgId, invoiceId);
   const pending = D(due).minus(paid);
   const body = await payments.withSavedRate(orgId, invoice.currency, { ...input, amount: input.amount || money(pending) });

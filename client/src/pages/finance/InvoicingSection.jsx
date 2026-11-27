@@ -1,3 +1,4 @@
+import CreditNotesPanel from './CreditNotesPanel.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Printer, RefreshCw } from 'lucide-react';
 import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
@@ -299,9 +300,10 @@ export default function InvoicingSection() {
       />
       <div className="flex gap-1" role="tablist" aria-label="Invoices or cancelled invoices">
         <button type="button" role="tab" aria-selected={view === 'invoices'} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'invoices' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('invoices')}>Invoices ({rows.length})</button>
+        <button type="button" role="tab" aria-selected={view === 'credit-notes'} data-testid="credit-notes-tab" className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'credit-notes' ? 'bg-primary-50 text-primary-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('credit-notes')}>Credit notes</button>
         <button type="button" role="tab" aria-selected={view === 'cancelled'} data-testid="cancelled-tab" className={`rounded-lg px-3 py-1.5 text-sm font-medium ${view === 'cancelled' ? 'bg-danger-50 text-danger-700' : 'text-tertiary-600 hover:bg-tertiary-50'}`} onClick={() => setView('cancelled')}>Cancelled ({cancelled.length})</button>
       </div>
-      {view === 'cancelled' ? (
+      {view === 'credit-notes' ? <CreditNotesPanel partyType="client" /> : view === 'cancelled' ? (
         <DataTable columns={cancelledInvoiceColumns} rows={cancelled} loading={loading} emptyLabel="No cancelled invoices." />
       ) : !loading && rows.length === 0 ? (
         <EmptyState title="No invoices yet" description="Compute revenue for a period, then generate an invoice for a project." />

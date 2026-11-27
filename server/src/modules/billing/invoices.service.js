@@ -582,7 +582,8 @@ async function listClientInvoices(orgId, { client_account_id, status, period_mon
   if (client_account_id) rows = rows.filter((r) => r.client_account_id === client_account_id || (r.line_items?.consolidated && (r.line_items.items || []).some((i) => i.account_id === client_account_id)));
   const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', rows.map((r) => r.id));
   const chases = await followups.summaries('client_invoice', rows.map((r) => r.id));
-  return rows.map((r) => withCollection(invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id)), chases.get(r.id)));
+  const credits = await require('./creditNotes.service').creditedByInvoice(orgId, 'client_invoice', rows.map((r) => r.id));
+  return rows.map((r) => withCollection(invoicePayments.withPayments(serializeClientInvoice(r), totals.get(r.id), credits.get(r.id) || 0), chases.get(r.id)));
 }
 
 // Payment collection on top of the payment state: due date, overdue days, next follow-up and the last chase note.
@@ -596,7 +597,8 @@ async function getClientInvoice(orgId, invoiceId) {
   if (!row) return { error: 'not_found' };
   const totals = await paymentsService.totals(prisma, orgId, 'client_invoice', [row.id]);
   const chases = await followups.summaries('client_invoice', [row.id]);
-  return { invoice: withCollection(invoicePayments.withPayments(serializeClientInvoice(row), totals.get(row.id)), chases.get(row.id)) };
+  const credited = await require('./creditNotes.service').creditedOf(orgId, 'client_invoice', row.id);
+  return { invoice: withCollection(invoicePayments.withPayments(serializeClientInvoice(row), totals.get(row.id), credited), chases.get(row.id)) };
 }
 
 // --- Vendor invoices -------------------------------------------------------
@@ -787,12 +789,16 @@ async function listVendorInvoices(orgId, { period_month, period_year, vendor_acc
     : [];
   const filesBy = new Map(fileCounts.map((g) => [g.entity_id, g._count._all]));
   const chases = await followups.summaries('vendor_invoice', rows.map((r) => r.id));
+  // credit notes from the vendor on an invoice lower what we owe on it
+  const credits = await require('./creditNotes.service').creditedByInvoice(orgId, 'vendor_invoice', rows.map((r) => r.id));
   return rows.map((row) => {
     const isPaid = paid.has(`${row.vendor_account_id}|${row.period_year}-${row.period_month}`);
     const chase = chases.get(row.id);
+    const base = serializeVendorInvoice(row);
+    const credited = credits.get(row.id) || 0;
     // overdue = still unpaid after the due date; follow-up due = the next follow-up date has come (the same rules as a client invoice)
     return {
-      ...serializeVendorInvoice(row), paid: isPaid, file_count: filesBy.get(row.id) || 0,
+      ...base, credited_amount: credited, net_payable: credited ? round2(base.net_payable - credited) : base.net_payable, paid: isPaid, file_count: filesBy.get(row.id) || 0,
       ...followups.collectionState({ due_date: row.due_date, next_followup_date: row.next_followup_date, open: !isPaid }),
       followup_count: chase?.followup_count || 0, last_followup_note: chase?.last_followup_note || null, last_followup_on: chase?.last_followup_on || null,
     };

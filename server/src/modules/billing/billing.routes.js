@@ -87,6 +87,9 @@ const ERRORS = {
   ...require('../payments/payments.service').PAYMENT_ERRORS,
   account_not_found: [404, 'Account not found'],
   already_paid: [409, 'This vendor payment is already paid'],
+  invoice_not_found: [404, 'That invoice was not found for this account'],
+  invoice_cancelled: [409, 'That invoice is cancelled'],
+  already_cancelled: [409, 'This credit note is already cancelled'],
   mixed_currencies: [422, 'This vendor has invoices in more than one currency for that month; pay it from Live Analytics > Vendor payments'],
   nothing_to_pay: [422, 'There is nothing to pay for this vendor and month'],
   not_approved: [409, 'The vendor payment must be approved first'],
@@ -932,6 +935,26 @@ router.post(
     return ok(res, result);
   })
 );
+
+// Credit notes: a numbered credit of an amount to a client or from a vendor, optionally against one invoice.
+const creditNotes = require('./creditNotes.service');
+router.get('/credit-notes', ...adminInOrg, asyncHandler(async (req, res) => ok(res, await creditNotes.list(req.user.org_id, creditNotes.listSchema.parse(req.query)))));
+router.post('/credit-notes', ...adminInOrg, asyncHandler(async (req, res) => {
+  const r = await creditNotes.create(req.user.org_id, req.user, creditNotes.createSchema.parse(req.body || {}));
+  if (r.error === 'more_than_open') return fail(res, 422, `The credit note is more than what is still open on the invoice (${r.currency} ${r.open})`);
+  return r.error ? failFor(res, r.error) : created(res, r.note);
+}));
+router.post('/credit-notes/:id/cancel', ...adminInOrg, asyncHandler(async (req, res) => {
+  const r = await creditNotes.cancel(req.user.org_id, req.user, req.params.id, creditNotes.cancelSchema.parse(req.body || {}).reason);
+  return r.error ? failFor(res, r.error) : ok(res, r.note);
+}));
+router.get('/credit-notes/:id/pdf', ...adminInOrg, asyncHandler(async (req, res) => {
+  const r = await creditNotes.pdf(req.user.org_id, req.params.id);
+  if (r.error) return failFor(res, r.error);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${r.filename}"`);
+  return res.send(r.buffer);
+}));
 
 // The same collection routes for a vendor invoice: due date, next follow-up date, follow-up log.
 router.patch(

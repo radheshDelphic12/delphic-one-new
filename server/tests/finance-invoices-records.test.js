@@ -840,6 +840,56 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await get({ ...AUG, to_month: AUG.period_month, to_year: AUG.period_year + 3 })).status).toBe(422);
   });
 
+  test('credit notes: numbered per financial year, lower what is pending on a client invoice (paid once covered) and a vendor invoice; cancel re-opens', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    await prisma.creditNote.deleteMany({});
+    const inv = (await api('post', '/invoices').send({ client_account_id: p.id, ...AUG })).body.data;
+    await api('post', `/invoices/${inv.id}/status`).send({ status: 'sent' });
+    const due = Number(inv.total_amount ?? inv.amount);
+    const getInv = async () => (await api('get', '/invoices')).body.data.find((r) => r.id === inv.id);
+    const cn = (body) => api('post', '/credit-notes').send({ party_type: 'client', account_id: p.id, issue_date: '2026-09-02', reason: 'Two days not billable', ...body });
+
+    const first = await cn({ invoice_id: inv.id, amount: 100 });
+    expect(first.status).toBe(201);
+    expect(first.body.data).toMatchObject({ number: 'CN/2026-27/0001', amount: 100, status: 'issued', invoice: { id: inv.id } });
+    let row = await getInv();
+    expect(Number(row.credited_amount)).toBe(100);
+    expect(Number(row.pending_amount)).toBeCloseTo(due - 100, 2);
+    // more than is open is refused; the rest closes the invoice
+    expect((await cn({ invoice_id: inv.id, amount: due })).status).toBe(422);
+    const second = await cn({ invoice_id: inv.id, amount: due - 100 });
+    expect(second.body.data.number).toBe('CN/2026-27/0002');
+    row = await getInv();
+    expect(row.status).toBe('paid');
+    // cancelling one re-opens the invoice
+    expect((await api('post', `/credit-notes/${second.body.data.id}/cancel`).send({ reason: 'Raised by mistake' })).status).toBe(200);
+    expect((await getInv()).status).toBe('sent');
+    expect((await api('post', `/credit-notes/${second.body.data.id}/cancel`).send({ reason: 'again' })).status).toBe(409);
+
+    // a vendor credit note lowers the vendor invoice's net payable
+    await api('post', '/vendor-invoices/generate').send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'VND-CN' });
+    const vinv = (await api('get', '/vendor-invoices').query(AUG)).body.data.find((r) => r.invoice_number === 'VND-CN');
+    const before = vinv.net_payable;
+    const vcn = await api('post', '/credit-notes').send({ party_type: 'vendor', account_id: ctx.vendor.id, invoice_id: vinv.id, amount: 10, reason: 'Vendor discount' });
+    expect(vcn.status).toBe(201);
+    const after = (await api('get', '/vendor-invoices').query(AUG)).body.data.find((r) => r.id === vinv.id);
+    expect(after.net_payable).toBeCloseTo(before - 10, 2);
+    expect(after.credited_amount).toBe(10);
+    // list and pdf
+    expect((await api('get', '/credit-notes').query({ party_type: 'vendor' })).body.data).toHaveLength(1);
+    const pdf = await api('get', `/credit-notes/${first.body.data.id}/pdf`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toMatch(/pdf/);
+    // the wrong account for an invoice
+    expect((await api('post', '/credit-notes').send({ party_type: 'vendor', account_id: ctx.vendor.id, invoice_id: inv.id, amount: 1, reason: 'mismatch' })).status).toBe(404);
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

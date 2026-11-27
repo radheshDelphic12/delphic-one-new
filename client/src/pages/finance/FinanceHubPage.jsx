@@ -20,6 +20,7 @@ import TaxInvoicesTab from './TaxInvoicesTab.jsx';
 // and add { key: 'project-pnl', label: 'Project P&L', icon: TrendingUp }.
 import FinanceCategoriesTab from './FinanceCategoriesTab.jsx';
 import { VendorUploadedInvoices } from '../vendorPortal/VendorPortalInternal.jsx';
+import CreditNotesPanel from './CreditNotesPanel.jsx';
 import SectionHeading from '../../components/ui/SectionHeading.jsx';
 
 // Tabs that already draw their own heading (or, for Expenses, per-view headings) get no extra one from the hub.
@@ -91,6 +92,7 @@ export default function FinanceHubPage() {
     { key: 'charges', label: 'GST & TDS setup', icon: Percent, description: 'GST and TDS rules applied to each vendor' },
     { key: 'payout', label: 'Bank payout', icon: Banknote, description: 'Unpaid vendor invoices per vendor, ready for the bank' },
     { key: 'uploaded', label: 'Uploaded by vendor', icon: FileText, description: 'Invoice files vendors sent through the vendor portal' },
+    { key: 'credit-notes', label: 'Credit notes', icon: FileText, description: 'Credit notes from vendors, which lower what we owe' },
   ];
   const tabsWithMenu = tabs.map((t) => (t.key === 'expenses' ? { ...t, blurb: TAB_HELP.expenses, children: expenseViews } : t.key === 'vendor-invoices' ? { ...t, blurb: TAB_HELP['vendor-invoices'], children: vendorViews } : t));
   const activeChildKey = section === 'expenses' ? (expenseViews.some((c) => c.key === view) ? view : 'mine') : section === 'vendor-invoices' ? (vendorViews.some((c) => c.key === view) ? view : 'invoices') : null;
@@ -105,7 +107,7 @@ export default function FinanceHubPage() {
       {section === 'invoicing' && has('invoicing') && <InvoicingSection />}
       {section === 'tax-invoices' && has('tax-invoices') && <TaxInvoicesTab />}
       {section === 'billing-setup' && has('billing-setup') && <BillingSetupTab />}
-      {section === 'vendor-invoices' && has('vendor-invoices') && (view === 'uploaded' ? <VendorUploadedInvoices /> : <VendorInvoicesTab />)}
+      {section === 'vendor-invoices' && has('vendor-invoices') && (view === 'uploaded' ? <VendorUploadedInvoices /> : view === 'credit-notes' ? <CreditNotesPanel partyType="vendor" /> : <VendorInvoicesTab />)}
       {section === 'payment-tracker' && has('payment-tracker') && <PaymentTrackerTab />}
       {section === 'group-charges' && has('group-charges') && <GroupChargesTab />}
       {section === 'categories' && has('categories') && <FinanceCategoriesTab />}
