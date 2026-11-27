@@ -10471,6 +10471,24 @@ model DocumentRequirement {
   @@map("document_requirements")
 }
 
+// People > Seating: a desk in an office and who sits there (one desk per person).
+model OfficeSeat {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id            String    @db.Uuid
+  location_id       String    @db.Uuid
+  label             String
+  zone              String?
+  active            Boolean   @default(true)
+  org_membership_id String?   @unique @db.Uuid
+  assigned_at       DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @default(now()) @updatedAt
+
+  @@unique([location_id, label])
+  @@index([org_id, location_id])
+  @@map("office_seats")
+}
+
 // Cross-functional teams across the group (Group Dashboard): a team can span several companies (company_ids, empty = all) and its
 // members can come from any of them. A person (user) can be in several teams.
 model CrossFunctionalTeam {
