@@ -378,7 +378,19 @@ async function createShift(orgId, { name, start_minutes, end_minutes, grace_minu
   return { shift };
 }
 
+/** Edit a shift (HR Settings). The people on it keep it; late marks use the new times from now on. */
+async function updateShift(orgId, id, input) {
+  const shift = await prisma.shift.findFirst({ where: { id, org_id: orgId } });
+  if (!shift) return { error: 'not_found' };
+  if (input.name && input.name !== shift.name) {
+    const clash = await prisma.shift.findUnique({ where: { org_id_name: { org_id: orgId, name: input.name } } });
+    if (clash) return { error: 'name_taken' };
+  }
+  return { shift: await prisma.shift.update({ where: { id }, data: input }) };
+}
+
 module.exports = {
+  updateShift,
   deleteRecord,
   listMine,
   listTeam,

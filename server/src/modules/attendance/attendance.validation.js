@@ -26,6 +26,14 @@ const createShiftSchema = z.object({
   grace_minutes: z.coerce.number().int().min(0).max(120).default(15),
 });
 
+// Editing a shift: any of its fields
+const updateShiftSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  start_minutes: z.coerce.number().int().min(0).max(1439).optional(),
+  end_minutes: z.coerce.number().int().min(0).max(1439).optional(),
+  grace_minutes: z.coerce.number().int().min(0).max(120).optional(),
+}).refine((v) => Object.keys(v).length > 0, 'Nothing to change');
+
 const STATUS = z.enum(['present', 'absent', 'half_day', 'leave', 'holiday', 'wfh']);
 // Wall-clock time in the org's timezone, e.g. "09:30".
 const TIME = z.string().trim().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24-hour)');
@@ -110,5 +118,5 @@ const regularizationListQuerySchema = z.object({ status: z.enum(['pending', 'app
 
 module.exports = {
   backfillMonthSchema, listQuerySchema, regularizeSchema,
-  deleteRecordSchema, createShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, STATUS,
+  deleteRecordSchema, createShiftSchema, updateShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, STATUS,
   regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema };

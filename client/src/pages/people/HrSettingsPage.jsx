@@ -40,7 +40,7 @@ function timeToMinutes(value) {
   return hours * 60 + minutes;
 }
 
-function NameDrawer({ open, title, value, onClose, onSubmit }) {
+function NameDrawer({ open, title, value, onClose, onSubmit, editing = false }) {
   const [name, setName] = useState(value || '');
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (open) setName(value || ''); }, [open, value]);
@@ -49,7 +49,7 @@ function NameDrawer({ open, title, value, onClose, onSubmit }) {
     setSaving(true);
     try { await onSubmit(name.trim()); onClose(); } finally { setSaving(false); }
   }
-  return <Drawer open={open} title={title} onClose={onClose} size="sm" tone="create" footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="settings-name-form" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'Saving...' : 'Save'}</button></>}><form id="settings-name-form" onSubmit={submit}><label className="block text-xs font-medium text-tertiary-600">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
+  return <Drawer open={open} title={title} onClose={onClose} size="sm" tone={editing ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="settings-name-form" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'Saving...' : 'Save'}</button></>}><form id="settings-name-form" onSubmit={submit}><label className="block text-xs font-medium text-tertiary-600">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
 }
 
 // Team: name, department, lead, and how it sits on the org chart — the manager
@@ -177,12 +177,17 @@ function LocationDrawer({ open, location = null, onClose, onSubmit }) {
   );
 }
 
-function ShiftDrawer({ open, onClose, onSubmit }) {
+function ShiftDrawer({ open, shift = null, onClose, onSubmit }) {
   const [fields, setFields] = useState({ name: '', start: '09:00', end: '18:00', grace_minutes: 15 });
   const [saving, setSaving] = useState(false);
+  // a shift being edited fills the form with its own times
+  useEffect(() => {
+    if (!open) return;
+    setFields(shift ? { name: shift.name, start: minutesToTime(shift.start_minutes), end: minutesToTime(shift.end_minutes), grace_minutes: shift.grace_minutes } : { name: '', start: '09:00', end: '18:00', grace_minutes: 15 });
+  }, [open, shift]);
   function set(key, value) { setFields((current) => ({ ...current, [key]: value })); }
   async function submit(event) { event.preventDefault(); setSaving(true); try { await onSubmit({ name: fields.name.trim(), start_minutes: timeToMinutes(fields.start), end_minutes: timeToMinutes(fields.end), grace_minutes: Number(fields.grace_minutes) }); onClose(); } finally { setSaving(false); } }
-  return <Drawer open={open} title="Add shift" onClose={onClose} size="sm" tone="create" footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="shift-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : 'Add shift'}</button></>}><form id="shift-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-tertiary-600">Start<input type="time" value={fields.start} onChange={(event) => set('start', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-tertiary-600">End<input type="time" value={fields.end} onChange={(event) => set('end', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></div><label className="block text-xs font-medium text-tertiary-600">Grace period in minutes<input type="number" min="0" max="120" value={fields.grace_minutes} onChange={(event) => set('grace_minutes', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
+  return <Drawer open={open} title={shift ? `Edit ${shift.name}` : 'Add shift'} onClose={onClose} size="sm" tone={shift ? 'edit' : 'create'} footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="shift-form" className="btn-primary" disabled={saving || !fields.name.trim()}>{saving ? 'Saving...' : shift ? 'Save shift' : 'Add shift'}</button></>}><form id="shift-form" onSubmit={submit} className="space-y-3"><label className="block text-xs font-medium text-tertiary-600">Name<input required value={fields.name} onChange={(event) => set('name', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-tertiary-600">Start<input type="time" value={fields.start} onChange={(event) => set('start', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label><label className="text-xs font-medium text-tertiary-600">End<input type="time" value={fields.end} onChange={(event) => set('end', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></div><label className="block text-xs font-medium text-tertiary-600">Grace period in minutes<input type="number" min="0" max="120" value={fields.grace_minutes} onChange={(event) => set('grace_minutes', event.target.value)} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" /></label></form></Drawer>;
 }
 
 // Handles both create (calendar prop absent) and edit (calendar prop set) —
@@ -345,6 +350,20 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
   // lets a screen that embeds this page (a company's Teams & reporting) refresh what depends on the list
   useEffect(() => { onChanged?.(); }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Departments, designations and shifts: edit one in place
+  const [editingRow, setEditingRow] = useState(null);
+  async function saveEdit(payload) {
+    try {
+      const { data } = await apiClient.patch(`${ENDPOINTS[tab]}/${editingRow.id}`, payload);
+      setRows((current) => current.map((r) => (r.id === data.data.id ? { ...r, ...data.data } : r)));
+      pushInfo(`${data.data.name} saved`);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Failed to save the change'), 'Something went wrong');
+      throw err;
+    }
+  }
+  const editButton = (row, label) => <button type="button" aria-label={label} data-testid="hr-setting-edit" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingRow(row)}><Pencil className="h-3.5 w-3.5" /></button>;
+
   const [editingTeam, setEditingTeam] = useState(null);
   async function updateTeam(payload) {
     try {
@@ -479,7 +498,7 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
   const canManage = adminFor(user, 'hr_settings.update');
   const names = { departments: 'department', designations: 'designation' };
   const columns = tab === 'departments' || tab === 'designations'
-    ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }]
+    ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end">{editButton(row, `Edit ${names[tab]}`)}</span> }] : [])]
     : tab === 'teams'
     ? [
         { key: 'name', header: 'Team' },
@@ -508,7 +527,7 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
         ) }] : []),
       ]
     : tab === 'shifts'
-    ? [{ key: 'name', header: 'Shift' }, { key: 'hours', header: 'Hours', render: (row) => `${minutesToTime(row.start_minutes)} - ${minutesToTime(row.end_minutes)}` }, { key: 'grace', header: 'Grace', render: (row) => `${row.grace_minutes}m` }]
+    ? [{ key: 'name', header: 'Shift' }, { key: 'hours', header: 'Hours', render: (row) => `${minutesToTime(row.start_minutes)} - ${minutesToTime(row.end_minutes)}` }, { key: 'grace', header: 'Grace', render: (row) => `${row.grace_minutes}m` }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end">{editButton(row, 'Edit shift')}</span> }] : [])]
     : [
         { key: 'name', header: 'Calendar', render: (row) => <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row.name}</button> },
         { key: 'kind', header: 'Kind', render: (row) => <span className="capitalize">{row.kind}</span> },
@@ -547,6 +566,8 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
     <LocationDrawer open={drawer === 'locations'} onClose={() => setDrawer(null)} onSubmit={async (payload) => { await createResource(payload); load(); }} />
     <LocationDrawer open={Boolean(editingLocation)} location={editingLocation} onClose={() => setEditingLocation(null)} onSubmit={(payload) => saveLocation(editingLocation, payload)} />
     <ShiftDrawer open={drawer === 'shifts'} onClose={() => setDrawer(null)} onSubmit={createResource} />
+    <ShiftDrawer open={Boolean(editingRow) && tab === 'shifts'} shift={tab === 'shifts' ? editingRow : null} onClose={() => setEditingRow(null)} onSubmit={saveEdit} />
+    <NameDrawer open={Boolean(editingRow) && (tab === 'departments' || tab === 'designations')} editing title={`Edit ${names[tab] || 'setting'}`} value={editingRow?.name || ''} onClose={() => setEditingRow(null)} onSubmit={(name) => saveEdit({ name })} />
     {tab === 'calendars' && <ProjectCalendarPanel refreshKey={projectsRefresh} canManage={canManage} onAdd={() => setAddProjectOpen(true)} />}
     <AddProjectModal open={addProjectOpen} onClose={() => setAddProjectOpen(false)} onCreated={() => setProjectsRefresh((n) => n + 1)} />
     <CalendarDrawer open={drawer === 'calendars'} onClose={() => setDrawer(null)} onSubmit={createResource} />

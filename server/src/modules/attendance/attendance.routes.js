@@ -8,7 +8,7 @@ const regularization = require('./attendanceRegularization.service');
 const autoAttendance = require('./autoAttendance.service');
 const attendanceDay = require('./attendanceDay.service');
 const leaveService = require('../leave/leave.service');
-const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, backfillMonthSchema, regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema } = require('./attendance.validation');
+const { listQuerySchema, regularizeSchema, deleteRecordSchema, createShiftSchema, updateShiftSchema, manualEntrySchema, setDaySchema, importSchema, templateQuerySchema, backfillMonthSchema, regularizationRequestSchema, regularizationDecisionSchema, regularizationListQuerySchema } = require('./attendance.validation');
 
 const router = express.Router();
 router.use(authenticate, requireOrgMembership);
@@ -218,6 +218,17 @@ router.post(
     const result = await service.createShift(req.user.org_id, body);
     if (result.error === 'name_taken') return fail(res, 409, 'Shift name already in use');
     return created(res, result.shift);
+  })
+);
+
+router.patch(
+  '/shifts/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.updateShift(req.user.org_id, req.params.id, updateShiftSchema.parse(req.body || {}));
+    if (result.error === 'not_found') return fail(res, 404, 'Shift not found');
+    if (result.error === 'name_taken') return fail(res, 409, 'Shift name already in use');
+    return ok(res, result.shift);
   })
 );
 

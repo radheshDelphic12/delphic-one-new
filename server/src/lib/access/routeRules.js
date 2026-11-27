@@ -65,6 +65,7 @@ const RULES = [
   [/^\/calendars(\/|$)/, 'holidays.update'],
 
   [/^\/attendance\/(me|shifts)$/, { GET: 'open', '*': 'hr_settings.update' }],
+  [/^\/attendance\/shifts\/[^/]+$/, 'hr_settings.update'],
   [/^\/resignations\/(mine|team|settings)$/, { GET: 'open', '*': 'admin' }],
   [/^\/resignations\/[^/]+\/(withdraw|manager-review)$/, 'open'],
   [/^\/resignations\/?$/, { POST: 'open', '*': 'people.update' }],

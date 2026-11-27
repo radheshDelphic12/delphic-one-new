@@ -127,6 +127,25 @@ describe('Client-brief amendment — shifts', () => {
     });
     expect(dup.status).toBe(409);
   });
+
+  test('HR settings edit: a shift, a department and a designation can be renamed / retimed; a clash or an unknown id is refused', async () => {
+    const { access_token: adminToken } = await seedOrgAdmin();
+    const post = (url, body) => authed(request(app).post(`/api/v1${url}`), adminToken).send(body);
+    const patch = (url, body) => authed(request(app).patch(`/api/v1${url}`), adminToken).send(body);
+    const day = (await post('/attendance/shifts', { name: 'Day', start_minutes: 540, end_minutes: 1080, grace_minutes: 15 })).body.data;
+    await post('/attendance/shifts', { name: 'Night', start_minutes: 1260, end_minutes: 360 });
+    const edited = await patch(`/attendance/shifts/${day.id}`, { name: 'Day (10-7)', start_minutes: 600, end_minutes: 1140, grace_minutes: 10 });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data).toMatchObject({ name: 'Day (10-7)', start_minutes: 600, end_minutes: 1140, grace_minutes: 10 });
+    expect((await patch(`/attendance/shifts/${day.id}`, { name: 'Night' })).status).toBe(409);
+    expect((await patch(`/attendance/shifts/${day.id}`, {})).status).toBe(422);
+    expect((await patch('/attendance/shifts/00000000-0000-4000-8000-000000000000', { name: 'X' })).status).toBe(404);
+
+    const dept = (await post('/departments', { name: 'Engg' })).body.data;
+    expect((await patch(`/departments/${dept.id}`, { name: 'Engineering' })).body.data.name).toBe('Engineering');
+    const desig = (await post('/designations', { name: 'SDE' })).body.data;
+    expect((await patch(`/designations/${desig.id}`, { name: 'Software Engineer' })).body.data.name).toBe('Software Engineer');
+  });
 });
 
 describe('Client-brief amendment — multi-project calendar mapping', () => {
