@@ -22,6 +22,7 @@ import ProjectTeamTimesheet from './ProjectTeamTimesheet.jsx';
 import MyDeployments, { useDeploymentAccess } from './MyDeployments.jsx';
 import TimesheetLocksTab from './TimesheetLocksTab.jsx';
 import RegularizationAdminTab from './RegularizationAdminTab.jsx';
+import TimesheetGapsTab from './TimesheetGapsTab.jsx';
 import HubTabs from '../../components/layout/HubTabs.jsx';
 import HubHeading from '../../components/layout/HubHeading.jsx';
 
@@ -56,6 +57,8 @@ const LOG_TAB = { key: 'log', label: 'Log time', icon: ListChecks, need: 'basic.
 // Admin: the client project timesheet (IT and contractors).
 const PROJECT_TIMESHEETS_TAB = { key: 'project-timesheets', label: 'Project Timesheets', icon: ClipboardList, need: 'timesheets.view' };
 // Admin: approval chain settings, per-employee month timesheet locks (bulk) and the lock audit trail.
+// Admin / Timesheets > View: the month in one table, per person and project, whose timesheet is not logged on which day.
+const GAPS_TAB = { key: 'timesheet-gaps', label: 'Timesheet gaps', icon: ClipboardList, need: 'timesheets.view' };
 const LOCKS_TAB = { key: 'locks', label: 'Attendance Locks', icon: Lock, need: 'timesheets.lock' };
 // Admin: every employee's attendance and project-timesheet correction requests, to approve or reject.
 const REGULARIZATION_TAB = { key: 'regularization', label: 'Regularization', icon: FileClock, need: ['regularization.view', 'regularization.approve'] };
@@ -85,7 +88,7 @@ export default function TimeAttendanceHubPage() {
     ...(user?.active_org?.is_master_workspace && (allowed(user, 'location_checkin.view', isAdmin) || allowed(user, 'hr_settings.update', isAdmin)) ? [LOCATION_CHECKIN_TAB, CONTRACTOR_CHECKIN_TAB] : []),
     ...(isApprover && !isAdmin ? [APPROVALS_TAB] : []),
     ...(deployments.any ? [DEPLOYMENTS_TAB] : []),
-    ...[PROJECT_TIMESHEETS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
+    ...[PROJECT_TIMESHEETS_TAB, GAPS_TAB, LOCKS_TAB, REGULARIZATION_TAB].filter((t) => allowed(user, t.need, isAdmin)),
   ].filter((t) => t.need == null || allowed(user, t.need, true));
   const has = (key) => TABS.some((t) => t.key === key);
   const [params, setParams] = useSearchParams();
@@ -106,6 +109,7 @@ export default function TimeAttendanceHubPage() {
         </div>
       )}
       {section === 'project-timesheets' && has('project-timesheets') && <ItTimesheetAdminView scope="it" />}
+      {section === 'timesheet-gaps' && has('timesheet-gaps') && <TimesheetGapsTab />}
       {/* Hidden on request – may be re-enabled later. ?section=dashboard falls back to the default tab because the tab is not in TABS. */}
       {/* {section === 'dashboard' && <TimesheetDashboard />} */}
       {section === 'attendance-dashboard' && <AttendanceDashboard />}

@@ -280,6 +280,10 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await dashboard.monthList(req.user.org_id, req.user, dashboardQuerySchema.parse(req.query))))
 );
 
+// Timesheet gaps: a whole month in one table - per person and project, the hours logged each day or a gap on a working day.
+const missingMatrix = require('./missingMatrix.service');
+router.get('/missing-matrix', asyncHandler(async (req, res) => ok(res, await missingMatrix.missingMatrix(req.user.org_id, req.user, missingMatrix.querySchema.parse(req.query)))));
+
 // One person's month as a calendar (logged hours, attendance, leave, lock, approval, OT per day).
 router.get(
   '/dashboard/calendar',
