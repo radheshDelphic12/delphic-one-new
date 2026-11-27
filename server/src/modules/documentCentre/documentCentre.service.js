@@ -7,6 +7,7 @@ const prisma = require('../../config/db');
 const { projectListWhere } = require('../../lib/projectScope');
 const env = require('../../config/env');
 const storage = require('../storage/storage.service');
+const { enqueue } = require('../../lib/email/outbox');
 
 // Document Centre (docs/features/DOCUMENT-CENTRE.md):
 //  1. what each client, vendor and employee should have on file, and what is missing ("?"), from the documents already uploaded;
@@ -346,6 +347,18 @@ async function resolveEntity(orgId, entityType, entityId) {
 }
 
 /** `file` is what multer saved (path, originalname, size). The caller removes it when this returns an error. */
+// ---- emails: the signer is told a document waits for them; the person who sent it is told it was signed, declined or cancelled.
+// Queued through the email outbox (never fails the action); a person without an email address simply gets none.
+const appLink = () => `${env.corsOrigin.replace(/\/$/, '')}/people?section=documents&doc=sign`;
+async function mailSigning(orgId, toUserId, subject, lines) {
+  try {
+    if (!toUserId) return;
+    const to = await prisma.user.findUnique({ where: { id: toUserId }, select: { email: true, name: true, active: true } });
+    if (!to?.email || to.active === false) return;
+    await enqueue(prisma, { orgId, kind: 'document_signing', to: { email: to.email, name: to.name }, subject, text: `Hi ${to.name || ''},\n\n${lines.join('\n')}\n\nOpen it: ${appLink()}` });
+  } catch { /* an email problem never blocks signing */ }
+}
+
 async function createRequest(orgId, user, meta, file) {
   if (!file) return { error: 'file_required' };
   const disk = storage.diskReport();
@@ -371,6 +384,8 @@ async function createRequest(orgId, user, meta, file) {
       signer_user_id: meta.signer_user_id, requested_by: user.id,
     },
   });
+  const requester = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } });
+  await mailSigning(orgId, meta.signer_user_id, `Please sign: ${meta.title}`, [`${requester?.name || 'A colleague'} asked you to sign "${meta.title}"${resolved.entity?.name ? ` (${resolved.entity.name})` : ''}.`, ...(meta.note ? [`Note: ${meta.note}`] : []), 'Open Documents > Sign documents, place your signature and finish.']);
   return { request: viewRequest(row, await namesOf([row])), pages };
 }
 
@@ -449,6 +464,7 @@ async function sign(orgId, user, id, body) {
   const out = path.join(signingDir(), `${crypto.randomUUID()}-signed.pdf`);
   fs.writeFileSync(out, bytes);
   const row = await prisma.signatureRequest.update({ where: { id }, data: { status: 'signed', placements: body.placements, signed_path: out, signed_size: bytes.length, signed_at: new Date() } });
+  await mailSigning(orgId, r.requested_by, `Signed: ${r.title}`, [`${signer?.name || 'The signer'} signed "${r.title}".`, `Download the signed copy${r.entity_name ? ` or attach it to ${r.entity_name}` : ''} from Documents > Sign documents.`]);
   return { request: viewRequest(row, await namesOf([row])) };
 }
 
@@ -458,6 +474,8 @@ async function decline(orgId, user, id, reason) {
   if (r.signer_user_id !== user.id) return { error: 'not_the_signer' };
   if (r.status !== 'pending') return { error: 'not_pending' };
   const row = await prisma.signatureRequest.update({ where: { id }, data: { status: 'declined', decline_reason: reason } });
+  const who = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } });
+  await mailSigning(orgId, r.requested_by, `Not signed: ${r.title}`, [`${who?.name || 'The signer'} did not sign "${r.title}".`, `Reason: ${reason}`]);
   return { request: viewRequest(row, await namesOf([row])) };
 }
 
@@ -467,6 +485,7 @@ async function cancel(orgId, user, id, decide) {
   if (r.requested_by !== user.id && !isManager(user, decide)) return { error: 'forbidden' };
   if (r.status !== 'pending') return { error: 'not_pending' };
   const row = await prisma.signatureRequest.update({ where: { id }, data: { status: 'cancelled' } });
+  await mailSigning(orgId, r.signer_user_id, `No longer needed: ${r.title}`, [`The request to sign "${r.title}" was cancelled; nothing to do.`]);
   return { request: viewRequest(row, await namesOf([row])) };
 }
 

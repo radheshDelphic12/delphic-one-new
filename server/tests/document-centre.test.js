@@ -157,6 +157,26 @@ describe('signing', () => {
     expect((await get('/signers')).body.data.map((s) => s.name)).toEqual(['Paras Signer']);
   });
 
+  test('emails: the signer is told when asked to sign; the sender is told when it is signed or declined', async () => {
+    await prisma.emailOutbox.deleteMany({ where: { kind: 'document_signing' } });
+    await authed(request(app).put(`${D}/signatures/me`), signerToken).send({ image: PNG });
+    const first = (await makeRequest()).res.body.data;
+    const mails = () => prisma.emailOutbox.findMany({ where: { kind: 'document_signing' }, orderBy: { created_at: 'asc' } });
+    let m = await mails();
+    expect(m).toHaveLength(1);
+    expect(m[0]).toMatchObject({ to_email: signer.email });
+    expect(m[0].subject).toMatch(/^Please sign: /);
+    await post(`/sign-requests/${first.id}/sign`, { placements: [{ page: 1, x: 0.1, y: 0.8, width: 0.2 }] }, signerToken);
+    m = await mails();
+    expect(m[1]).toMatchObject({ to_email: admin.email });
+    expect(m[1].subject).toMatch(/^Signed: /);
+    const second = (await makeRequest()).res.body.data;
+    await post(`/sign-requests/${second.id}/decline`, { reason: 'Wrong version' }, signerToken);
+    m = await mails();
+    expect(m[m.length - 1]).toMatchObject({ to_email: admin.email });
+    expect(m[m.length - 1].body_text).toMatch(/Wrong version/);
+  });
+
   test('the company stamp: set by a manager, placed with the signature; a stamp alone or a missing stamp is refused', async () => {
     await authed(request(app).put(`${D}/signatures/me`), signerToken).send({ image: PNG });
     expect((await get('/stamp', {}, signerToken)).body.data).toEqual({ has_stamp: false });
