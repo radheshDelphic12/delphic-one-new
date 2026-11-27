@@ -154,7 +154,7 @@ async function generateQuestions(ctx, settings) {
   const { data, usage } = await askJson({
     system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}${reference}`,
     webSearchDomains: sites,
-    user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role, pitched at the ${level.label} level (${level.guidance}) - ${DIFFICULTY_TEXT[difficultyOf(settings)]}. Start with a short, easy opening question about their work, then role-specific questions built from the required skills and the candidate's own background. Each question must be answerable in 1 to 2 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
+    user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nWrite exactly ${n} interview questions for this candidate for this role, pitched at the ${level.label} level (${level.guidance}) - ${DIFFICULTY_TEXT[difficultyOf(settings)]}. The interview already opens with this fixed question, so do NOT ask the candidate to introduce themselves, describe their background or summarise their experience again: "${INTRO_QUESTION}". Write role-specific questions built from the required skills and the candidate's own background; every question must cover a different topic (no two questions may ask the same thing in other words). Each question must be answerable in 1 to 2 minutes by speaking, be specific, and not ask for personal or protected information.${aptitudeAsk}\nReturn {"questions":[{"text":"..."}]${m ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
     maxTokens: 7000, // up to 12 + 12 questions, the aptitude ones with their expected answers
     documents: ctx.resume ? [ctx.resume] : [],
   });
@@ -163,7 +163,10 @@ async function generateQuestions(ctx, settings) {
   // questions this candidate already got in an earlier link / re-take of the same interview are never asked again
   const asked = new Set(avoidList(ctx).map(norm));
   const fresh = (t) => !asked.has(norm(t));
-  const parseRole = (d) => (Array.isArray(d?.questions) ? d.questions : []).map(clean).filter(Boolean).filter(fresh);
+  // the fixed introduction is always question 1: a role question that asks for it again ("introduce yourself", "tell me about yourself") is dropped
+  const notIntro = (t) => !INTRO_LIKE.test(t);
+  const unique = (list) => list.filter((t, i) => list.findIndex((x) => norm(x) === norm(t)) === i);
+  const parseRole = (d) => unique((Array.isArray(d?.questions) ? d.questions : []).map(clean).filter(Boolean).filter(fresh).filter(notIntro));
   const parseApt = (d) => (Array.isArray(d?.aptitude) ? d.aptitude : [])
     .map((q) => ({ text: bounded(q?.text, 600).trim(), expected: bounded(q?.expected_answer, 300).trim() }))
     .filter((q) => q.text && q.expected && fresh(q.text));
@@ -178,7 +181,7 @@ async function generateQuestions(ctx, settings) {
     try {
       const more = await askJson({
         system: `You are a careful first-round interviewer for a recruitment company.\n${SAFETY_RULES}${extra(settings)}`,
-        user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nYou already wrote these questions. Do not repeat or rephrase any of them:\n${[...role, ...aptitude.map((q) => q.text)].map((t) => `- ${t}`).join('\n')}\n\nWrite exactly ${missingRole} interview questions for this candidate for this role, at the same ${level.label} level and the same difficulty (${DIFFICULTY_TEXT[difficultyOf(settings)]}), each answerable in 1 to 2 minutes by speaking.${missingApt ? `\nAlso write exactly ${missingApt} aptitude questions (logical reasoning, numbers or patterns) of easy level (school-level arithmetic, simple series and everyday logic, no tricks) that can be solved in your head in about 1 minute. Give each one's correct answer as expected_answer.` : ''}\nReturn {"questions":[{"text":"..."}]${missingApt ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
+        user: `${contextBlock(ctx)}${avoidBlock(ctx)}\n\nYou already wrote these questions. Do not repeat or rephrase any of them, and do not ask the candidate to introduce themselves:\n${[INTRO_QUESTION, ...role, ...aptitude.map((q) => q.text)].map((t) => `- ${t}`).join('\n')}\n\nWrite exactly ${missingRole} interview questions for this candidate for this role, at the same ${level.label} level and the same difficulty (${DIFFICULTY_TEXT[difficultyOf(settings)]}), each answerable in 1 to 2 minutes by speaking.${missingApt ? `\nAlso write exactly ${missingApt} aptitude questions (logical reasoning, numbers or patterns) of easy level (school-level arithmetic, simple series and everyday logic, no tricks) that can be solved in your head in about 1 minute. Give each one's correct answer as expected_answer.` : ''}\nReturn {"questions":[{"text":"..."}]${missingApt ? ',"aptitude":[{"text":"...","expected_answer":"..."}]' : ''}}`,
         maxTokens: 4000,
       });
       role = [...role, ...parseRole(more.data).filter((t) => !role.some((r) => norm(r) === norm(t)))].slice(0, n);
@@ -200,6 +203,8 @@ async function generateQuestions(ctx, settings) {
 }
 
 const INTRO_QUESTION = 'Before we begin, please introduce yourself: your name, where you are from, your education and work background, what you are doing now and what you are looking for next.';
+// A role question that only asks for the introduction again (the screenshot case: "Please introduce yourself briefly and tell me about ...").
+const INTRO_LIKE = /\b(introduce yourself|introduction|tell (me|us) (a (little|bit) )?about yourself|walk (me|us) through your (background|profile|resume|cv|career)|describe your (background|profile))\b/i;
 
 // ---- follow-up (role questions only; an aptitude answer is marked against its expected answer) ----
 async function decideFollowUp(ctx, settings, question, answer) {

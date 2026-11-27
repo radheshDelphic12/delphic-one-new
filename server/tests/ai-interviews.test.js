@@ -325,6 +325,26 @@ describe('settings', () => {
   });
 });
 
+describe('questions are never repeated', () => {
+  test('a role question that asks for the introduction again, or a duplicate, is dropped and replaced', async () => {
+    const logic = require('../src/modules/aiInterviews/aiInterviews.logic');
+    const calls = [];
+    setProvider(async ({ messages }) => {
+      calls.push(messages[0].content);
+      const questions = calls.length === 1
+        ? ['Please introduce yourself briefly and tell me about the project you worked on most recently.', 'How do you design a REST API?', 'How do you design a REST API?', 'How do you test a React component?']
+        : ['How do you handle errors in Node.js?'];
+      return { text: JSON.stringify({ questions: questions.map((text) => ({ text })) }), usage: { input: 1, output: 1 } };
+    });
+    const { questions } = await logic.generateQuestions({ role_title: 'Full stack developer', candidate_experience: 3 }, { question_count: 3, aptitude_enabled: false, aptitude_question_count: 0, use_reference_sites: false, reference_sites: '' });
+    setProvider(stubProvider);
+    expect(questions.map((q) => q.kind)).toEqual(['intro', 'role', 'role', 'role']);
+    expect(questions.filter((q) => /introduce yourself/i.test(q.text))).toHaveLength(1);
+    expect(questions.slice(1).map((q) => q.text)).toEqual(['How do you design a REST API?', 'How do you test a React component?', 'How do you handle errors in Node.js?']);
+    expect(calls[0]).toContain('do NOT ask the candidate to introduce themselves');
+  });
+});
+
 describe('aptitude section and the reason for a result', () => {
   test('the AI writes aptitude questions after the role questions; no follow-ups, and the expected answers stay on the server', async () => {
     await authed(request(app).put('/api/v1/ai-interviews/settings'), adminToken).send({ max_followups: 5 });
