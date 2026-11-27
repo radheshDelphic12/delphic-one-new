@@ -11,6 +11,14 @@ const PALETTE = {
 const pctText = (n) => `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 })}%`;
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+// "Names only": the company name without the legal suffix (Private Limited, LLP ...), so the chart stays small and readable
+const SUFFIX = /[\s,.-]*(private\s+limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp|inc\.?|incorporated|corporation|corp\.?|company|co\.?|fzco|fze|llc|gmbh|pte\.?\s*ltd\.?)$/i;
+export function shortName(name) {
+  let out = String(name || '').trim();
+  for (let i = 0; i < 2; i += 1) out = out.replace(SUFFIX, '').trim();
+  return out || String(name || '');
+}
+
 function paletteOf(node) {
   if (node.kind === 'group') return PALETTE.group;
   if (node.kind === 'external') return PALETTE.external;
@@ -41,8 +49,13 @@ function EdgeLabel({ x, y, pct }) {
  */
 export default function OwnershipChart({ companies, groups, statuses, onOpenCompany, initialMode = 'structure' }) {
   const [mode, setMode] = useState(initialMode);
+  const [compact, setCompact] = useState(false); // names only: short company names, small boxes, no second line
   const graph = useMemo(() => buildOwnershipGraph(companies, groups, statuses), [companies, groups, statuses]);
-  const layout = useMemo(() => (graph.nodes.length ? (mode === 'circular' ? layoutRadial(graph) : layoutTree(graph)) : null), [graph, mode]);
+  const layout = useMemo(() => {
+    if (!graph.nodes.length) return null;
+    if (mode === 'circular') return layoutRadial(graph, compact ? { nodeW: 120, nodeH: 30, ringGap: 170 } : undefined);
+    return layoutTree(graph, compact ? { nodeW: 124, nodeH: 32, gapX: 18, gapY: 74 } : undefined);
+  }, [graph, mode, compact]);
 
   return (
     <section className="space-y-3" data-testid="ownership-chart">
@@ -53,10 +66,13 @@ export default function OwnershipChart({ companies, groups, statuses, onOpenComp
           ))}
           <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-dashed border-tertiary-400 bg-white opacity-60" />Dimmed = holder shown for context</span>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 text-xs text-tertiary-700"><input type="checkbox" checked={compact} onChange={(e) => setCompact(e.target.checked)} data-testid="chart-compact" /> Names only (short)</label>
         <div className="inline-flex rounded-xl border border-tertiary-100 bg-white p-0.5 text-xs" role="tablist" aria-label="Chart style">
           {[['structure', 'Structure chart'], ['circular', 'Circular chart']].map(([key, label]) => (
             <button key={key} type="button" role="tab" aria-selected={mode === key} data-testid={`chart-mode-${key}`} onClick={() => setMode(key)} className={`rounded-[10px] px-3 py-1.5 font-medium ${mode === key ? 'bg-primary-600 text-white' : 'text-tertiary-600 hover:bg-tertiary-50'}`}>{label}</button>
           ))}
+        </div>
         </div>
       </div>
 
@@ -64,7 +80,7 @@ export default function OwnershipChart({ companies, groups, statuses, onOpenComp
         {!layout ? (
           <p className="px-4 py-10 text-center text-sm text-tertiary-500" data-testid="chart-empty">No ownership to draw for the chosen statuses. Add holders with the ownership icon in the register.</p>
         ) : (
-          <svg role="img" aria-label="Ownership chart of the group" viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" style={{ maxWidth: layout.width, minWidth: Math.min(layout.width, 720) }} className="mx-auto block h-auto" data-testid="chart-svg" data-mode={mode}>
+          <svg role="img" aria-label="Ownership chart of the group" viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" style={{ maxWidth: layout.width, minWidth: Math.min(layout.width, compact ? 480 : 720) }} className="mx-auto block h-auto" data-testid="chart-svg" data-mode={mode}>
             {mode === 'circular' && layout.radii.filter((r) => r > 0).map((r) => <circle key={r} cx={layout.cx} cy={layout.cy} r={r} fill="none" stroke="#E5E7EB" strokeDasharray="4 6" />)}
             {layout.edges.map((e) => {
               const curve = mode === 'structure';
@@ -97,8 +113,14 @@ export default function OwnershipChart({ companies, groups, statuses, onOpenComp
                 >
                   <title>{`${n.label} — ${subtitle(n)}`}</title>
                   <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={12} fill={c.fill} stroke={c.stroke} strokeWidth="1.5" strokeDasharray={n.context ? '5 4' : undefined} />
-                  <text x={box.x + box.w / 2} y={box.y + box.h / 2 - 3} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.text}>{clip(n.label, mode === 'circular' ? 22 : 23)}</text>
-                  <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 14} textAnchor="middle" fontSize="10.5" fill={c.sub}>{clip(subtitle(n), 30)}</text>
+                  {compact ? (
+                    <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 4} textAnchor="middle" fontSize="11.5" fontWeight="700" fill={c.text}>{clip(shortName(n.label), 17)}</text>
+                  ) : (
+                    <>
+                      <text x={box.x + box.w / 2} y={box.y + box.h / 2 - 3} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.text}>{clip(n.label, mode === 'circular' ? 22 : 23)}</text>
+                      <text x={box.x + box.w / 2} y={box.y + box.h / 2 + 14} textAnchor="middle" fontSize="10.5" fill={c.sub}>{clip(subtitle(n), 30)}</text>
+                    </>
+                  )}
                 </g>
               );
             })}
