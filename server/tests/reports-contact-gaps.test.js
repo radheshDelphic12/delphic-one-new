@@ -29,3 +29,35 @@ test('lists accounts with a POC phone or email missing, most gaps first; complet
   const vendors = (await authed(request(app).get('/api/v1/reports/contact-gaps'), token).query({ type: 'vendor' })).body.data;
   expect(vendors.rows.map((r) => r.name)).toEqual(['Nothing Vendor']);
 });
+
+test('rows carry the status and can be filtered by one or more statuses', async () => {
+  const mk = (data) => prisma.account.create({ data: { org_id: org.id, owner_id: admin.id, origin_owner_id: admin.id, ...data } });
+  await mk({ type: 'vendor', name: 'Active Vendor', stage: 'active' });
+  await mk({ type: 'vendor', name: 'Lead Vendor', stage: 'lead' });
+  await mk({ type: 'client', name: 'Dropped Client', stage: 'dropped' });
+  const get = (q) => authed(request(app).get('/api/v1/reports/contact-gaps'), token).query(q).then((r) => r.body.data.rows);
+  const all = await get({});
+  expect(all.find((r) => r.name === 'Lead Vendor').stage).toBe('lead');
+  expect((await get({ stage: 'active' })).map((r) => r.name)).toEqual(['Active Vendor']);
+  expect((await get({ stage: 'lead,dropped' })).map((r) => r.name).sort()).toEqual(['Dropped Client', 'Lead Vendor']);
+  expect((await get({ stage: 'nonsense' })).length).toBe(3);
+});
+
+test('skip moves an account to the Skipped list; bring back returns it', async () => {
+  const a = await prisma.account.create({ data: { org_id: org.id, owner_id: admin.id, origin_owner_id: admin.id, type: 'vendor', name: 'Skip Me', stage: 'active' } });
+  await prisma.account.create({ data: { org_id: org.id, owner_id: admin.id, origin_owner_id: admin.id, type: 'vendor', name: 'Keep Me', stage: 'active' } });
+  const res = await authed(request(app).post(`/api/v1/reports/contact-gaps/${a.id}/skip`), token).send({ reason: 'Ask again in Jan' });
+  expect(res.status).toBe(200);
+  let d = (await authed(request(app).get('/api/v1/reports/contact-gaps'), token)).body.data;
+  expect(d.rows.map((r) => r.name)).toEqual(['Keep Me']);
+  expect(d.summary).toMatchObject({ vendors_with_gaps: 1, skipped: 1 });
+  const skipped = (await authed(request(app).get('/api/v1/reports/contact-gaps'), token).query({ view: 'skipped' })).body.data.rows;
+  expect(skipped).toHaveLength(1);
+  expect(skipped[0]).toMatchObject({ name: 'Skip Me', skipped: { reason: 'Ask again in Jan', by: { id: admin.id } } });
+  expect((await authed(request(app).delete(`/api/v1/reports/contact-gaps/${a.id}/skip`), token)).status).toBe(200);
+  d = (await authed(request(app).get('/api/v1/reports/contact-gaps'), token)).body.data;
+  expect(d.rows.map((r) => r.name).sort()).toEqual(['Keep Me', 'Skip Me']);
+  expect(d.summary.skipped).toBe(0);
+  const other = '00000000-0000-4000-8000-000000000000';
+  expect((await authed(request(app).post(`/api/v1/reports/contact-gaps/${other}/skip`), token).send({})).status).toBe(404);
+});

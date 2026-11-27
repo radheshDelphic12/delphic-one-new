@@ -298,7 +298,24 @@ router.get(
 // Clients and vendors whose point of contact has no phone or email (Reports > Missing contact details)
 router.get('/contact-gaps', authorize('admin', 'sales', 'bda'), asyncHandler(async (req, res) => {
   const type = ['client', 'vendor'].includes(req.query.type) ? req.query.type : undefined;
-  return ok(res, await require('./contactGaps.service').contactGaps(req.user.org_id, { type, stage: req.query.stage === 'active' ? 'active' : undefined }));
+  const view = req.query.view === 'skipped' ? 'skipped' : 'open';
+  return ok(res, await require('./contactGaps.service').contactGaps(req.user.org_id, { type, stage: req.query.stage, view }));
+}));
+
+// Skip an account for now (it moves to the Skipped list), or bring it back into the list.
+const contactGapAccount = (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.accountId)) { fail(res, 400, 'Invalid account'); return null; }
+  return req.params.accountId;
+};
+router.post('/contact-gaps/:accountId/skip', authorize('admin', 'sales', 'bda'), asyncHandler(async (req, res) => {
+  const id = contactGapAccount(req, res); if (!id) return undefined;
+  const r = await require('./contactGaps.service').skip(req.user.org_id, req.user.id, id, { reason: typeof req.body?.reason === 'string' ? req.body.reason : null });
+  return r.error ? fail(res, 404, 'Account not found') : ok(res, r);
+}));
+router.delete('/contact-gaps/:accountId/skip', authorize('admin', 'sales', 'bda'), asyncHandler(async (req, res) => {
+  const id = contactGapAccount(req, res); if (!id) return undefined;
+  const r = await require('./contactGaps.service').unskip(req.user.org_id, id);
+  return r.error ? fail(res, 404, 'Account not found') : ok(res, r);
 }));
 
 router.get(

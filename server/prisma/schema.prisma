@@ -10633,6 +10633,19 @@ model CompanyStamp {
   @@map("company_stamps")
 }
 
+// Reports > Missing contact details: an account skipped for now (left out of the list until someone brings it back).
+model ContactGapSkip {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  account_id String   @db.Uuid
+  reason     String?
+  skipped_by String?  @db.Uuid
+  skipped_at DateTime @default(now())
+
+  @@unique([org_id, account_id])
+  @@map("contact_gap_skips")
+}
+
 model UserSignature {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id     String   @db.Uuid
