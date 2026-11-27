@@ -290,6 +290,20 @@ describe('financials, plans, projection and valuation', () => {
     expect(manual.effective).toBe(777);
   });
 
+  test('org financials count the Book Keeping invoices issued for the company (taxable value in INR); contract-month and cancelled ones are left out', async () => {
+    const { token, org } = await setup(['trading']);
+    const groupId = org.org_group_id || (await prisma.orgGroup.create({ data: { name: 'G-fin' } })).id;
+    const entity = await prisma.legalEntity.create({ data: { org_group_id: groupId, workspace_id: org.id, name: 'Book Co Pvt Ltd' } });
+    const base = { org_group_id: groupId, legal_entity_id: entity.id, series: 'GI', type: 'gst', invoice_date: new Date(), currency: 'INR', seller: {}, buyer_name: 'B', lines: [], cgst: 0, sgst: 0, igst: 0, receiving_wallet_id: entity.id };
+    await prisma.groupInvoice.create({ data: { ...base, seq: 1, number: 'BK-1', subtotal: 5000, total: 5900 } });
+    await prisma.groupInvoice.create({ data: { ...base, seq: 2, number: 'BK-2', subtotal: 700, total: 826, status: 'cancelled' } });
+    await prisma.groupInvoice.create({ data: { ...base, seq: 3, number: 'BK-3', subtotal: 900, total: 1062, contract_id: entity.id, contract_month: 1, contract_year: 2026 } });
+    const monthly = await authed(request(app).get('/api/v1/financials/monthly?months=1'), token);
+    const current = monthly.body.data[0];
+    expect(current.revenue_breakdown.book_keeping_invoices).toBe(5000);
+    expect(current.revenue).toBe(5000);
+  });
+
   test('org financials combine trading, project, contract and billing sources; plan compares to actual', async () => {
     const { token, org } = await setup(['trading', 'projects', 'contracts']);
     const now = new Date();

@@ -80,7 +80,7 @@ async function salaryForMonth(orgId, win) {
 
 async function actualsForMonth(orgId, win) {
   const range = { gte: win.start, lt: win.end };
-  const [billing, tradeSales, tradePurchases, projectRows, claims, vendors, recurring, salary] = await Promise.all([
+  const [billing, tradeSales, tradePurchases, projectRows, claims, vendors, recurring, salary, bookInvoices, fx] = await Promise.all([
     prisma.dailyProjectRevenue.aggregate({ where: { org_id: orgId, date: range }, _sum: { revenue: true } }),
     prisma.tradeTransaction.aggregate({ where: { org_id: orgId, txn_type: 'sale', status: 'completed', txn_date: range }, _sum: { amount: true } }),
     prisma.tradeTransaction.aggregate({ where: { org_id: orgId, txn_type: 'purchase', status: 'completed', txn_date: range }, _sum: { amount: true } }),
@@ -89,7 +89,16 @@ async function actualsForMonth(orgId, win) {
     prisma.vendorPayment.aggregate({ where: { org_id: orgId, status: { in: ['approved', 'paid'] }, period_month: win.month, period_year: win.year }, _sum: { amount: true } }),
     contractsService.recurringRevenueForMonth(orgId, win.year, win.month),
     salaryForMonth(orgId, win),
+    // Group Dashboard > Book Keeping invoices issued for this company (tagged to it, or by its own legal entity). Invoices that bill a
+    // contract month are left out: the contract's recurring revenue already counts them.
+    prisma.groupInvoice.findMany({
+      where: { status: 'issued', contract_id: null, invoice_date: range, OR: [{ workspace_id: orgId }, { workspace_id: null, legal_entity: { workspace_id: orgId } }] },
+      select: { subtotal: true, currency: true },
+    }),
+    require('../billing/exchangeRates.service').inrRates(orgId),
   ]);
+  // the taxable value (before GST) in INR, at the company's saved rate for a foreign currency
+  const bookKeeping = bookInvoices.reduce((t, i) => t + num(i.subtotal) * (fx.get(i.currency || 'INR') ?? 0), 0);
 
   const project = { revenue: 0, expense: 0, salary: 0, other: 0 };
   for (const g of projectRows) project[g.entry_type] = num(g._sum.amount) || 0;
@@ -99,6 +108,7 @@ async function actualsForMonth(orgId, win) {
     trading: num(tradeSales._sum.amount) || 0,
     projects: project.revenue,
     recurring_contracts: recurring,
+    book_keeping_invoices: bookKeeping,
   };
   const expenseParts = {
     expense_claims: num(claims._sum.amount) || 0,
