@@ -10454,6 +10454,38 @@ model DocumentRequirement {
   @@map("document_requirements")
 }
 
+// Cross-functional teams across the group (Group Dashboard): a team can span several companies (company_ids, empty = all) and its
+// members can come from any of them. A person (user) can be in several teams.
+model CrossFunctionalTeam {
+  id           String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String                      @db.Uuid
+  name         String
+  description  String?
+  company_ids  String[]                    @default([]) @db.Uuid
+  lead_user_id String?                     @db.Uuid
+  created_by   String?                     @db.Uuid
+  created_at   DateTime                    @default(now())
+  updated_at   DateTime                    @default(now()) @updatedAt
+  deleted_at   DateTime?
+  members      CrossFunctionalTeamMember[]
+
+  @@index([org_group_id])
+  @@map("cross_functional_teams")
+}
+
+model CrossFunctionalTeamMember {
+  id       String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  team_id  String              @db.Uuid
+  team     CrossFunctionalTeam @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  user_id  String              @db.Uuid
+  org_id   String?             @db.Uuid
+  added_at DateTime            @default(now())
+
+  @@unique([team_id, user_id])
+  @@index([user_id])
+  @@map("cross_functional_team_members")
+}
+
 // The company's stamp (seal), dragged onto a document next to the signature while signing (Document Centre). One per company.
 model CompanyStamp {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

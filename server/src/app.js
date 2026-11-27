@@ -200,6 +200,9 @@ app.use('/api/v1/external-access', requireFinanceModule('external_access'), exte
 app.use('/api/v1/org-chart', orgChartRoutes);
 app.use('/api/v1/group-offices', groupOfficesRoutes);
 app.use('/api/v1/group-companies', groupCompaniesRoutes);
+const crossTeams = require('./modules/crossTeams/crossTeams.routes');
+app.use('/api/v1/group-teams', crossTeams.group);
+app.use('/api/v1/cross-teams', crossTeams.company);
 app.use('/api/v1/group-tax', groupTaxRoutes);
 app.use('/api/v1/storage', storageRoutes);
 app.use('/api/v1/letters', lettersRoutes);

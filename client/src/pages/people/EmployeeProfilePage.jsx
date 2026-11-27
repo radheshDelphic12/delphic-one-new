@@ -1,3 +1,4 @@
+import CrossTeamsField from './CrossTeamsField.jsx';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, UserRound } from 'lucide-react';
@@ -466,6 +467,7 @@ export default function EmployeeProfilePage() {
       {/* Bank, emergency contact, documents — renders only for an admin or the employee themselves. */}
       <ReportingSection membershipId={row.id} />
       <PersonalDetailsSection membershipId={row.id} />
+      <CrossTeamsField membershipId={row.id} canEdit={canEdit} />
       <CalendarMappingSection membershipId={row.id} locationName={row.location?.name} canEdit={canEdit} />
       <JoiningDateDrawer open={joiningOpen} row={row} onClose={() => setJoiningOpen(false)} onSaved={handleSaved} />
       <EditMembershipDrawer

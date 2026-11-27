@@ -1,3 +1,4 @@
+import GroupCrossTeamsTab from './GroupCrossTeamsTab.jsx';
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSearchParams } from 'react-router-dom';
@@ -160,6 +161,7 @@ const TABS = [
   { key: 'tasks', label: 'Tasks & Weekly plan', icon: ListChecks },
   { key: 'travel', label: 'Travel', icon: Plane, description: 'Group trips and client deployments, linked to the calendar.' },
   { key: 'org-chart', label: 'Org Chart', icon: Network },
+  { key: 'cross-teams', label: 'Cross-functional teams', icon: Users, description: 'Teams that span the companies of the group: description, companies and members from any of them.' },
   { key: 'headcount', label: 'Headcount & Hiring', icon: Users },
   { key: 'companies', label: 'Companies & Stakes', icon: PieChart, description: 'Every business in the group: its status, owners and stakes.' },
   { key: 'offices', label: 'Offices', icon: MapPin, description: 'Offices of every company: headcount, employees and locations.' },
@@ -185,6 +187,7 @@ export default function GroupOverviewPage() {
       {section === 'dashboard' && <GroupDashboardTab />}
       {section === 'cash' && <GroupCashTab />}
       {section === 'taxes' && <GroupTaxTab />}
+      {section === 'cross-teams' && <GroupCrossTeamsTab />}
       {section === 'projections' && <ProjectionsTab />}
       {section === 'tasks' && <GroupTasksTab />}
       {section === 'travel' && <GroupTravelHub />}
