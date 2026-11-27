@@ -789,6 +789,36 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await authed(request(app).put('/api/v1/billing/payment-tracker/resource-payment'), (await loginAs(other)).access_token).send(body)).status).toBeGreaterThanOrEqual(401);
   });
 
+  test('vendor invoice: the payment is recorded from Vendor Invoices (finds or creates the vendor payment of the month, pays it once)', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    await api('post', '/vendor-invoices/generate').send({ vendor_account_id: ctx.vendor.id, ...AUG, invoice_number: 'VND-9' });
+    const listed = async () => (await api('get', '/vendor-invoices').query(AUG)).body.data.find((r) => r.invoice_number === 'VND-9');
+    const inv = await listed();
+    expect(inv.paid).toBe(false);
+    expect(inv).toHaveProperty('invoice_date');
+
+    const preview = (await api('get', `/vendor-invoices/${inv.id}/payment`)).body.data;
+    expect(preview).toMatchObject({ currency: inv.currency, status: null });
+    expect(preview.amount).toBeCloseTo(inv.net_payable, 2);
+    expect(preview.invoices.map((x) => x.id)).toEqual([inv.id]);
+
+    const paid = await api('post', `/vendor-invoices/${inv.id}/payment`).send({ exchange_rate: '83' });
+    expect(paid.status).toBe(200);
+    expect(paid.body.data.payment.status).toBe('paid');
+    expect((await listed()).paid).toBe(true);
+    const vp = await prisma.vendorPayment.findFirst({ where: { vendor_account_id: ctx.vendor.id, ...AUG } });
+    expect(vp).toMatchObject({ status: 'paid' });
+    // a second time: already paid
+    expect((await api('post', `/vendor-invoices/${inv.id}/payment`).send({ exchange_rate: '83' })).status).toBe(409);
+    expect((await api('get', '/vendor-invoices/00000000-0000-4000-8000-000000000000/payment')).status).toBe(404);
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

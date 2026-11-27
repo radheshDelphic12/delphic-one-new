@@ -14,6 +14,7 @@ import FilesPanel from '../../components/FilesPanel.jsx';
 import { PurchaseDrawer, PayPurchaseDrawer } from './VendorPurchaseDrawers.jsx';
 import InvoiceCollectionDrawer from '../../components/payments/InvoiceCollectionDrawer.jsx';
 import { promptAction } from '../../lib/confirmAction.js';
+import usePaymentDialog, { isPaymentCancelled } from '../../components/payments/usePaymentDialog.jsx';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const money = (n, c = 'INR') => `${c} ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -99,6 +100,7 @@ function TraceDrawer({ invoiceId, onClose }) {
  */
 export default function VendorInvoicesTab() {
   const { pushError, pushSuccess } = useAlerts();
+  const paymentDialog = usePaymentDialog();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -189,6 +191,24 @@ export default function VendorInvoicesTab() {
     track(row, { gst_amount: Number(gst) || 0, tds_amount: Number(tds) || 0, adjustment_amount: Number(adjustment) || 0, adjustment_note: note.trim() || undefined }, 'GST / TDS / adjustment saved');
   }
 
+  // Paid / unpaid of a project vendor invoice is the vendor payment of that vendor and month (one payment covers all its invoices
+  // of the month). Record it here: the server finds or creates that payment, approves it if pending, and pays it.
+  async function recordPayment(row) {
+    let preview;
+    try { preview = (await apiClient.get(`/billing/vendor-invoices/${row.id}/payment`)).data.data; } catch (err) { pushError(apiErrorMessage(err, 'Could not read the vendor payment'), 'Something went wrong'); return; }
+    const others = preview.invoices.length > 1 ? ` It covers all ${preview.invoices.length} invoices of this vendor for the month.` : '';
+    try {
+      await paymentDialog.pay(
+        { title: `Pay ${preview.vendor_name}`, direction: 'out', currency: preview.currency, amount: preview.amount, fixedAmount: true, party: preview.vendor_name, note: `Vendor payment for ${MONTHS[row.period_month - 1]} ${row.period_year}.${others}` },
+        (body) => apiClient.post(`/billing/vendor-invoices/${row.id}/payment`, body),
+      );
+      pushSuccess('Payment recorded; the invoice shows as paid');
+      load();
+    } catch (err) {
+      if (!isPaymentCancelled(err)) pushError(apiErrorMessage(err, 'Could not record the payment'), 'Something went wrong');
+    }
+  }
+
   async function exportVendor() {
     try {
       await downloadFile('/calculations/export/vendor', { period_month: month, period_year: year }, `vendor-${year}-${String(month).padStart(2, '0')}.xlsx`);
@@ -216,6 +236,7 @@ export default function VendorInvoicesTab() {
     { key: 'type', header: 'Type', render: (r) => (r.kind === 'purchase' ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">Purchase</span> : <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-800">Project invoice</span>) },
     { key: 'project', header: 'Project', render: (r) => (r.kind === 'purchase' ? <span className="text-tertiary-500">{r.category_name || 'No project'}{r.description ? ` - ${r.description}` : ''}</span> : r.project?.name || '—') },
     { key: 'number', header: 'Invoice', render: (r) => (r.kind === 'purchase' ? r.bill_number : r.invoice_number) || '—' },
+    { key: 'invoice_date', header: 'Invoice date', render: (r) => <span className="whitespace-nowrap text-xs">{(r.kind === 'purchase' ? r.bill_date : r.invoice_date) ? String(r.kind === 'purchase' ? r.bill_date : r.invoice_date).slice(0, 10) : <span className="text-tertiary-400">not set</span>}</span> },
     { key: 'amount', header: 'Amount', render: (r) => money(r.amount, r.currency) },
     { key: 'gst', header: 'GST', render: (r) => `+${money(r.gst_amount, r.currency)}` },
     { key: 'tds', header: 'TDS', render: (r) => `-${money(r.tds_amount, r.currency)}` },
@@ -260,6 +281,7 @@ export default function VendorInvoicesTab() {
         </span>
       ) : (
         <span className="flex flex-wrap gap-1">
+          {!r.paid && <button type="button" className="btn-ghost text-xs font-medium text-primary-700" data-testid="vendor-invoice-pay" onClick={() => recordPayment(r)}>Record payment</button>}
           <button type="button" className="btn-ghost text-xs" onClick={() => track(r, { sent: !r.sent }, r.sent ? 'Marked unsent' : 'Marked sent')}>{r.sent ? 'Mark unsent' : 'Mark sent'}</button>
           <button type="button" className="btn-ghost text-xs" onClick={() => editMoney(r)}>GST / TDS / adjustment</button>
           <button type="button" className="btn-ghost text-xs" data-testid="vendor-invoice-files" onClick={() => setFilesFor(r)}>Files{r.file_count ? ` (${r.file_count})` : ''}</button>
@@ -299,6 +321,7 @@ export default function VendorInvoicesTab() {
         </div>
       </div>
       <DataTable columns={columns} rows={tableRows} loading={!rows} emptyLabel="No vendor invoices or purchases for this month" maxHeight="calc(100dvh - 22rem)" />
+      {paymentDialog.dialog}
       <TraceDrawer invoiceId={traceId} onClose={() => setTraceId(null)} />
       <InvoiceCollectionDrawer invoice={chaseFor} title={chaseFor ? `Payment follow-up: ${chaseFor.vendor_account?.name || 'Vendor'} ${chaseFor.invoice_number || ''}`.trim() : ''} basePath={chaseFor ? `/billing/vendor-invoices/${chaseFor.id}` : ''} onClose={() => setChaseFor(null)} onChanged={load} />
       <PurchaseDrawer open={purchaseDrawer.open} purchase={purchaseDrawer.purchase} vendors={vendors} onClose={() => setPurchaseDrawer({ open: false, purchase: null })} onSubmit={savePurchase} />

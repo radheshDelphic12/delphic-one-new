@@ -86,6 +86,10 @@ const ERRORS = {
   ...cashHooks.HOOK_ERRORS,
   ...require('../payments/payments.service').PAYMENT_ERRORS,
   account_not_found: [404, 'Account not found'],
+  already_paid: [409, 'This vendor payment is already paid'],
+  mixed_currencies: [422, 'This vendor has invoices in more than one currency for that month; pay it from Live Analytics > Vendor payments'],
+  nothing_to_pay: [422, 'There is nothing to pay for this vendor and month'],
+  not_approved: [409, 'The vendor payment must be approved first'],
   requirement_not_found: [404, 'Requirement not found for that account'],
   not_found: [404, 'Not found'],
   invoice_exists: [409, 'An invoice already exists for that client and period'],
@@ -901,6 +905,28 @@ router.delete(
   asyncHandler(async (req, res) => {
     const r = await paymentTracker.unmarkResourcePaid(req.user.org_id, paymentTracker.unmarkSchema.parse(req.query));
     return r.error ? trackerError(res, r.error) : ok(res, { unmarked: true });
+  })
+);
+
+// Record the payment of a vendor invoice from Finance > Vendor Invoices (the month's vendor payment, which covers all of the vendor's
+// invoices of that month): GET what it would pay, POST to pay it through the payment popup.
+const vendorInvoicePay = require('./vendorInvoicePay.service');
+router.get(
+  '/vendor-invoices/:id/payment',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const p = await vendorInvoicePay.paymentPreview(req.user.org_id, req.params.id);
+    if (p.error) return failFor(res, p.error);
+    return ok(res, { amount: p.amount, currency: p.currency, vendor_name: p.vendor_name, status: p.payment?.status || null, invoices: p.invoices });
+  })
+);
+router.post(
+  '/vendor-invoices/:id/payment',
+  ...adminInOrg,
+  asyncHandler(async (req, res) => {
+    const result = await vendorInvoicePay.recordPayment(req.user.org_id, req.user, req.params.id, paymentsService.paymentInputSchema.parse(req.body || {}));
+    if (result.error) return failFor(res, result.error);
+    return ok(res, result);
   })
 );
 
