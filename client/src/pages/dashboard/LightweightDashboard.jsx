@@ -5,6 +5,7 @@ import apiClient from '../../lib/apiClient.js';
 import { useAuth } from '../../lib/authContext.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
+import MyWorkCard from './MyWorkCard.jsx';
 import CelebrationBadge from './CelebrationBadge.jsx';
 import BenchCard from './BenchCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
@@ -80,6 +81,7 @@ function ModernDashboard() {
         </div>
       </div>
       {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
+      <MyWorkCard />
       <AnnouncementsCard />
     </div>
   );
@@ -123,6 +125,7 @@ export default function LightweightDashboard({ orgName, isAdmin = false }) {
           </Link>
         ))}
       </div>
+      <MyWorkCard />
       <AnnouncementsCard />
       {isAdmin && <BenchCard />}
       {isAdmin && <LeaveBalancesPanel compact />}

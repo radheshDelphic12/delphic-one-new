@@ -33,6 +33,7 @@ import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
 import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
 import BenchCard from './BenchCard.jsx';
 import TeamAllocationCard from './TeamAllocationCard.jsx';
+import MyWorkCard from './MyWorkCard.jsx';
 
 const cardMotion = {
   initial: { opacity: 0, y: 12 },
@@ -427,6 +428,11 @@ export default function DashboardPage() {
             </div>
             <RecentActivityPanel rows={summary?.recent_activity} />
           </div>
+
+          {/* everyone: the projects you are on and the hours you logged, by week / month / quarter / year */}
+          <motion.div {...cardMotion}>
+            <MyWorkCard />
+          </motion.div>
 
           <motion.div {...cardMotion}>
             <AnnouncementsCard />

@@ -280,6 +280,13 @@ router.get(
   asyncHandler(async (req, res) => ok(res, await dashboard.monthList(req.user.org_id, req.user, dashboardQuerySchema.parse(req.query))))
 );
 
+// Dashboard > My projects: the projects the caller is allocated to and the hours they logged, by week / month / quarter / year.
+const myWork = require('./myWork.service');
+router.get('/my-work', asyncHandler(async (req, res) => {
+  const r = await myWork.myWork(req.user, myWork.querySchema.parse(req.query));
+  return r.error ? fail(res, 403, 'Active organization membership required') : ok(res, r);
+}));
+
 // Timesheet gaps: a whole month in one table - per person and project, the hours logged each day or a gap on a working day.
 const missingMatrix = require('./missingMatrix.service');
 router.get('/missing-matrix', asyncHandler(async (req, res) => ok(res, await missingMatrix.missingMatrix(req.user.org_id, req.user, missingMatrix.querySchema.parse(req.query)))));
