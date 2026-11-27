@@ -186,7 +186,7 @@ export default function InvoicingSection() {
   }
 
   // Month by month: which invoices are paid, partly paid or unpaid; filters combine, totals follow them (one line per currency).
-  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '', collect: '' });
+  const [filters, setFilters] = useState({ year: '', month: '', status: '', pay: '', q: '', collect: '', dueBy: '' });
   const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
   const years = useMemo(() => [...new Set(rows.map((r) => r.period_year))].sort((a, b) => b - a), [rows]);
   const shown = useMemo(() => rows.filter((r) => (
@@ -195,6 +195,8 @@ export default function InvoicingSection() {
     && (!filters.status || r.status === filters.status)
     && (!filters.pay || r.payment_status === filters.pay)
     && (!filters.collect || (filters.collect === 'overdue' && r.overdue) || (filters.collect === 'followup_due' && r.followup_due) || (filters.collect === 'no_due_date' && r.status === 'sent' && r.payment_status !== 'paid' && !r.due_date))
+    // "due till a date": sent and not fully paid, with a due date on or before the chosen day (overdue ones included)
+    && (!filters.dueBy || (r.status !== 'draft' && r.payment_status !== 'paid' && r.due_date && String(r.due_date).slice(0, 10) <= filters.dueBy))
     && (!filters.q || `${r.invoice_number || ''} ${r.line_items?.project?.name || ''} ${r.client_account?.name || ''}`.toLowerCase().includes(filters.q.toLowerCase()))
   )), [rows, filters]);
   const totals = useMemo(() => {
@@ -263,7 +265,10 @@ export default function InvoicingSection() {
         <select value={filters.status} onChange={setFilter('status')} aria-label="Status" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any status</option><option value="draft">Draft</option><option value="sent">Sent</option><option value="paid">Paid</option></select>
         <select value={filters.pay} onChange={setFilter('pay')} aria-label="Payment" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">Any payment</option><option value="unpaid">Unpaid</option><option value="partly_paid">Partly paid</option><option value="paid">Paid</option></select>
         <select value={filters.collect} onChange={setFilter('collect')} aria-label="Collection" data-testid="invoicing-collection-filter" className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm"><option value="">All collection</option><option value="overdue">Overdue ({overdueCount})</option><option value="followup_due">Follow-up due ({followupDueCount})</option><option value="no_due_date">No due date set</option></select>
-        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '', collect: '' })}>Clear filters</button>}
+        <label className="flex items-center gap-1.5 text-xs text-tertiary-600">Due till
+          <input type="date" value={filters.dueBy} onChange={setFilter('dueBy')} aria-label="Due till" data-testid="invoicing-due-by" className="rounded-xl border border-tertiary-200 px-2.5 py-1.5 text-sm" title="Invoices not yet fully paid whose due date is on or before this day" />
+        </label>
+        {anyFilter && <button type="button" className="btn-ghost text-xs" onClick={() => setFilters({ year: '', month: '', status: '', pay: '', q: '', collect: '', dueBy: '' })}>Clear filters</button>}
       </div>
       {totals.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" data-testid="invoicing-totals">
