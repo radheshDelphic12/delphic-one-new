@@ -9,8 +9,8 @@ import { confirmAction, promptAction } from '../../lib/confirmAction.js';
 import Drawer from '../../components/ui/Drawer.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 
-const KINDS = [['client', 'Clients'], ['vendor', 'Vendors'], ['employee', 'Employees']];
-const ENTITY_TYPE = { client: 'account', vendor: 'account', employee: 'org_membership' };
+const KINDS = [['client', 'Clients'], ['vendor', 'Vendors'], ['employee', 'Employees'], ['project', 'Projects']];
+const ENTITY_TYPE = { client: 'account', vendor: 'account', employee: 'org_membership', project: 'account' };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const label = 'block text-xs font-medium text-tertiary-600';
 const inputCls = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm';
@@ -64,7 +64,7 @@ function UploadDrawer({ target, onClose, onDone }) {
 function RequirementsDrawer({ open, onClose, onChanged }) {
   const { pushError } = useAlerts();
   const [rows, setRows] = useState([]);
-  const [adding, setAdding] = useState({ client: '', vendor: '', employee: '' });
+  const [adding, setAdding] = useState({ client: '', vendor: '', employee: '', project: '' });
   const load = useCallback(() => apiClient.get('/document-centre/requirements').then(({ data }) => setRows(data.data || [])).catch(() => setRows([])), []);
   useEffect(() => { if (open) load(); }, [open, load]);
   const done = () => { load(); onChanged(); };
@@ -151,7 +151,7 @@ export default function OverviewTab() {
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className={label}>Search<input className={inputCls} style={{ width: '13rem' }} placeholder="Name" value={q} onChange={(e) => setQ(e.target.value)} /></label>
-          {kind !== 'employee' && <label className={label}>Show<select className={inputCls} value={stage} onChange={(e) => setStage(e.target.value)}><option value="active">Active only</option><option value="all">All stages</option></select></label>}
+          {kind !== 'employee' && kind !== 'project' && <label className={label}>Show<select className={inputCls} value={stage} onChange={(e) => setStage(e.target.value)}><option value="active">Active only</option><option value="all">All stages</option></select></label>}
           {kind === 'vendor' && (
             <>
               <label className={label}>Invoices of<select className={inputCls} aria-label="Invoice month" value={month} onChange={(e) => setMonth(Number(e.target.value))}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></label>
@@ -177,7 +177,7 @@ export default function OverviewTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-canvas-muted">
               <tr>
-                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500">{kind === 'employee' ? 'Employee' : kind === 'vendor' ? 'Vendor' : 'Client'}</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500">{kind === 'employee' ? 'Employee' : kind === 'vendor' ? 'Vendor' : kind === 'project' ? 'Project' : 'Client'}</th>
                 {data.requirements.map((r) => <th key={r} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500">{r}</th>)}
                 {kind === 'vendor' && <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500">Invoices ({MONTHS[(data.month || month) - 1].slice(0, 3)} {data.year || year})</th>}
                 <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500">Missing</th>

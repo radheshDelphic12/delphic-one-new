@@ -87,6 +87,25 @@ describe('what is on file', () => {
     expect(o.summary.missing_items).toBe(0);
   });
 
+  test('projects: each project (flagged, or an older one Finance lists) with its own agreement on file or missing', async () => {
+    const client = await account('client', 'Kilo Corp');
+    const p1 = await account('client', 'Kilo build', { is_project: true, client_account_id: client.id, project_name: 'Kilo build' });
+    const p2 = await account('client', 'Kilo run', { is_project: true, client_account_id: client.id, project_name: 'Kilo run' });
+    const legacy = await account('client', 'Lima', { project_name: 'Lima ops' });
+    await prisma.billingRate.create({ data: { org_id: org.id, account_id: legacy.id, rate_type: 'monthly', rate: 1, effective_from: new Date('2026-01-01'), created_by: admin.id } });
+    await doc('account', p1.id, 'Client Agreement');
+    await account('client', 'Mike', { is_project: true, project_name: 'Mike svc', client_agreement_url: 'https://drive.example/mike' });
+    const o = (await get('/overview', { kind: 'project' })).body.data;
+    expect(o.requirements).toEqual(['Agreement']);
+    const by = Object.fromEntries(o.rows.map((r) => [r.name, r]));
+    expect(by['Kilo build'].items[0].state).toBe('uploaded');
+    expect(by['Kilo run'].items[0].state).toBe('missing');
+    expect(by['Kilo run'].sub).toMatch(/Kilo Corp/);
+    expect(by['Lima ops'].items[0].state).toBe('missing');
+    expect(by['Mike svc'].items[0].state).toBe('uploaded');
+    expect(o.rows.map((r) => r.name)).not.toContain('Kilo Corp');
+  });
+
   test('vendors: the agreement and the month invoices (with or without a file); employees: their own list of documents', async () => {
     const vendor = await account('vendor', 'Vendor One');
     const project = await account('client', 'Some Project', { is_project: true });

@@ -16,9 +16,9 @@ const { enqueue } = require('../../lib/email/outbox');
 //  3. how much storage all this takes, and a clean-up that removes the originals of documents already dealt with.
 // Files live in private folders of the uploads directory (signing/, signatures/) and are read only through the routes of this module.
 
-const KINDS = ['client', 'vendor', 'employee'];
+const KINDS = ['client', 'vendor', 'employee', 'project'];
 const TAGS = ['client', 'vendor', 'employee', 'invoice', 'other'];
-const DEFAULTS = { client: ['Agreement'], vendor: ['Agreement'], employee: ['Offer / appointment letter', 'ID proof', 'Address proof'] };
+const DEFAULTS = { client: ['Agreement'], vendor: ['Agreement'], employee: ['Offer / appointment letter', 'ID proof', 'Address proof'], project: ['Agreement'] };
 const WORKING = ['active', 'on_leave', 'notice_period'];
 const MAX_PDF_BYTES = 15 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 600 * 1024;
@@ -39,11 +39,12 @@ const safeUnlink = (p) => { try { if (p) fs.unlinkSync(p); return true; } catch 
 const requirementSchema = z.object({ kind: z.enum(KINDS), name: z.string().trim().min(1, 'Give it a name').max(80) });
 
 async function ensureRequirements(orgId) {
-  const count = await prisma.documentRequirement.count({ where: { org_id: orgId } });
-  if (count > 0) return;
+  // each kind gets its defaults the first time it has no list at all (a kind added later, like projects, too)
+  const counts = await prisma.documentRequirement.groupBy({ by: ['kind'], where: { org_id: orgId }, _count: { _all: true } });
+  const have = new Set(counts.map((c) => c.kind));
   const rows = [];
-  for (const kind of KINDS) DEFAULTS[kind].forEach((name, i) => rows.push({ org_id: orgId, kind, name, sort_order: i }));
-  await prisma.documentRequirement.createMany({ data: rows, skipDuplicates: true });
+  for (const kind of KINDS) if (!have.has(kind)) DEFAULTS[kind].forEach((name, i) => rows.push({ org_id: orgId, kind, name, sort_order: i }));
+  if (rows.length) await prisma.documentRequirement.createMany({ data: rows, skipDuplicates: true });
 }
 
 async function listRequirements(orgId) {
@@ -124,6 +125,16 @@ async function overview(orgId, query) {
       take: LIMIT + 1,
     });
     entities = rows.map((m) => ({ id: m.id, name: m.person?.name || '', sub: [m.employee_code, m.designation?.name, m.worker_type === 'contractor' ? 'Contractor' : null].filter(Boolean).join(' · '), link: null }));
+  } else if (kind === 'project') {
+    // projects (Finance > Projects: flagged projects and the older ones Finance lists): the agreement uploaded on the project itself
+    entityType = 'account';
+    const rows = await prisma.account.findMany({
+      where: { AND: [projectListWhere(orgId), ...(q ? [{ OR: [{ name: { contains: q, mode: 'insensitive' } }, { project_name: { contains: q, mode: 'insensitive' } }] }] : [])] },
+      select: { id: true, name: true, project_name: true, client_name: true, client_agreement_url: true, contract_status: true, agreement_end_date: true, client_account: { select: { name: true } } },
+      orderBy: { name: 'asc' },
+      take: LIMIT + 1,
+    });
+    entities = rows.map((a) => ({ id: a.id, name: a.project_name || a.name, sub: [a.client_account?.name || a.client_name, a.contract_status && a.contract_status !== 'active' ? a.contract_status : null, a.agreement_end_date ? `agreement ends ${ymd(a.agreement_end_date)}` : null].filter(Boolean).join(' · '), agreement_link: a.client_agreement_url }));
   } else {
     entityType = 'account';
     const rows = await prisma.account.findMany({
