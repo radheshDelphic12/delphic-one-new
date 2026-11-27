@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/authContext.jsx';
 import LeaveBalancesPanel from '../leave/LeaveBalancesPanel.jsx';
 import AnnouncementsCard from './AnnouncementsCard.jsx';
 import MyWorkCard from './MyWorkCard.jsx';
+import TeamAllocationCard from './TeamAllocationCard.jsx';
 import CelebrationBadge from './CelebrationBadge.jsx';
 import BenchCard from './BenchCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
@@ -82,6 +83,7 @@ function ModernDashboard() {
       </div>
       {/* birthdays and work anniversaries of the next 14 days (hidden when there are none) */}
       <MyWorkCard />
+      {user?.active_org?.is_master_workspace && <TeamAllocationCard />}
       <AnnouncementsCard />
     </div>
   );
@@ -94,7 +96,7 @@ function ModernDashboard() {
  * panel plus quick links to the shared core-ERP modules every company keeps.
  */
 export default function LightweightDashboard({ orgName, isAdmin = false }) {
-  const { isGroupSuperadmin } = useAuth();
+  const { user, isGroupSuperadmin } = useAuth();
   if (!isGroupSuperadmin) return <ModernDashboard />;
   return (
     <div className="space-y-5">
@@ -126,6 +128,7 @@ export default function LightweightDashboard({ orgName, isAdmin = false }) {
         ))}
       </div>
       <MyWorkCard />
+      {user?.active_org?.is_master_workspace && <TeamAllocationCard />}
       <AnnouncementsCard />
       {isAdmin && <BenchCard />}
       {isAdmin && <LeaveBalancesPanel compact />}

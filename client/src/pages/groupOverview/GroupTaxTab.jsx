@@ -24,10 +24,12 @@ const SUBTABS = [
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SYMBOL = { INR: '₹', USD: '$', AED: 'AED ', EUR: '€', GBP: '£', SAR: 'SAR ' };
 const money = (n, cur = 'INR') => `${Number(n) < 0 ? '-' : ''}${SYMBOL[cur] ?? `${cur} `}${Math.abs(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const th = 'px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500';
+const th = 'whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-tertiary-500';
 const thr = `${th} text-right`;
 const td = 'px-3 py-2 align-top';
-const tdr = `${td} text-right tabular-nums`;
+// amounts, dates and badges never wrap (the table scrolls sideways instead): "-₹25,000.00" on one line
+const tdr = `${td} text-right tabular-nums whitespace-nowrap`;
+const tdn = `${td} whitespace-nowrap`;
 const labelCls = 'mb-1 block text-xs font-medium text-tertiary-600';
 const todayYmd = () => new Date().toLocaleDateString('en-CA');
 const thisMonth = () => todayYmd().slice(0, 7);
@@ -106,17 +108,17 @@ function InvoicesView({ params, onOpenTds }) {
           <tbody>
             {data.rows.map((r) => (
               <tr key={r.key} className="cursor-pointer border-t border-tertiary-100 hover:bg-primary-50/40" onClick={() => setOpen(r)} data-testid="tax-invoice-row">
-                <td className={td}>{r.company}</td>
-                <td className={`${td} font-medium text-tertiary-900`}>{r.number || '—'}{r.kind === 'group_invoice' && <span className="ml-1 text-[10px] font-normal text-tertiary-500">Book Keeping</span>}</td>
-                <td className={td}>{r.client || '—'}{r.project && r.project !== r.client && <span className="block text-[11px] text-tertiary-500">{r.project}</span>}</td>
+                <td className={`${td} min-w-[9rem]`}>{r.company}</td>
+                <td className={`${tdn} font-medium text-tertiary-900`}>{r.number || '—'}{r.kind === 'group_invoice' && <span className="ml-1 text-[10px] font-normal text-tertiary-500">Book Keeping</span>}</td>
+                <td className={`${td} min-w-[10rem]`}>{r.client || '—'}{r.project && r.project !== r.client && <span className="block text-[11px] text-tertiary-500">{r.project}</span>}</td>
                 <td className={`${td} whitespace-nowrap`}>{r.invoice_date}{r.billing_month && (r.billing_month !== r.period_month || r.billing_year !== r.period_year) && <span className="block text-[11px] text-tertiary-500" data-testid="billing-period">For {String(r.billing_month).padStart(2, '0')}/{r.billing_year}</span>}</td>
                 <td className={tdr}>{money(r.base, r.currency)}{r.adjustment ? <span className="block text-[11px] font-normal text-tertiary-500" data-testid="base-adjustment">{money(r.gross_base, r.currency)} {r.adjustment < 0 ? '−' : '+'} {money(Math.abs(r.adjustment), r.currency)} adj.</span> : null}</td>
                 <td className={tdr}>{r.gst ? money(r.gst, r.currency) : '—'}</td>
                 <td className={tdr}>{r.tds ? money(-r.tds, r.currency) : '—'}</td>
                 <td className={`${tdr} font-medium`}>{money(r.total, r.currency)}</td>
                 <td className={tdr}>{r.pending ? money(r.pending, r.currency) : '—'}</td>
-                <td className={td}><Pill tone={TAX_BADGE[r.tax_mode][0]}>{TAX_BADGE[r.tax_mode][1]}</Pill></td>
-                <td className={td}><Pill tone={(INV_STATUS[r.status] || INV_STATUS.sent)[0]}>{(INV_STATUS[r.status] || INV_STATUS.sent)[1]}</Pill></td>
+                <td className={tdn}><Pill tone={TAX_BADGE[r.tax_mode][0]}>{TAX_BADGE[r.tax_mode][1]}</Pill></td>
+                <td className={tdn}><Pill tone={(INV_STATUS[r.status] || INV_STATUS.sent)[0]}>{(INV_STATUS[r.status] || INV_STATUS.sent)[1]}</Pill></td>
               </tr>
             ))}
             {!data.rows.length && <tr><td colSpan={11} className="px-3 py-8 text-center text-sm text-tertiary-500">No invoices in these months.</td></tr>}
@@ -212,7 +214,7 @@ function TdsView({ params }) {
                   </span>
                 ))}</td>
                 <td className={`${tdr} font-medium`}>{money(i.outstanding, i.currency)}</td>
-                <td className={td}><Pill tone={TDS_STATUS[i.status][0]}>{TDS_STATUS[i.status][1]}</Pill></td>
+                <td className={tdn}><Pill tone={TDS_STATUS[i.status][0]}>{TDS_STATUS[i.status][1]}</Pill></td>
                 <td className={`${td} text-right`}>{i.outstanding > 0 && <button type="button" className="btn-secondary text-xs" data-testid="record-refund" onClick={() => setRefund({ item: i, amount: String(i.outstanding), received_on: todayYmd(), reference: '', note: '' })}>Record refund</button>}</td>
               </tr>
             ))}
@@ -377,7 +379,7 @@ function ChallanRow({ c, onEdit, onRemove, onFile }) {
   return (
     <tr className="border-t border-tertiary-100" data-testid="challan-row">
       <td className={`${td} whitespace-nowrap`}>{c.paid_on}</td>
-      <td className={td}><Pill tone={c.kind.startsWith('gst') ? 'blue' : c.kind.startsWith('tds') ? 'amber' : 'gray'}>{c.kind_label}</Pill></td>
+      <td className={tdn}><Pill tone={c.kind.startsWith('gst') ? 'blue' : c.kind.startsWith('tds') ? 'amber' : 'gray'}>{c.kind_label}</Pill></td>
       <td className={`${td} font-medium text-tertiary-900`}>{c.challan_number || '—'}{c.bsr_code && <span className="block text-[11px] font-normal text-tertiary-500">BSR {c.bsr_code}</span>}</td>
       <td className={td}>{c.company}</td>
       <td className={td}>{c.period}</td>
@@ -488,7 +490,7 @@ function GstView({ params, companies }) {
         <table className="min-w-full text-sm">
           <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Vendor</th><th className={th}>Invoice</th><th className={th}>Invoice date</th><th className={th}>Billing month</th><th className={thr}>Base</th><th className={thr}>GST</th></tr></thead>
           <tbody>
-            {data.vendor_gst.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-gst-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={td}>{r.invoice_date}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base)}</td><td className={`${tdr} font-medium`}>{money(r.gst)}</td></tr>)}
+            {data.vendor_gst.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-gst-row"><td className={`${td} min-w-[9rem]`}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={td}>{r.invoice_date}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base)}</td><td className={`${tdr} font-medium`}>{money(r.gst)}</td></tr>)}
             {!data.vendor_gst.rows.length && <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-tertiary-500">No vendor invoice with GST in these months.</td></tr>}
           </tbody>
           {data.vendor_gst.rows.length > 0 && <tfoot className="bg-canvas-muted"><tr><td className={`${td} font-semibold`} colSpan={6}>Total</td><td className={`${tdr} font-semibold`}>{money(data.vendor_gst.total)}</td></tr></tfoot>}
@@ -552,7 +554,7 @@ function TdsPayableView({ params, companies }) {
         <table className="min-w-full text-sm">
           <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Employee</th><th className={th}>Month</th><th className={thr}>TDS withheld</th><th className={th}>Note</th></tr></thead>
           <tbody>
-            {data.employee_rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="employee-tds-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.employee}{r.employee_code && <span className="ml-1 text-[11px] font-normal text-tertiary-500">{r.employee_code}</span>}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.tds)}</td><td className={`${td} text-xs text-tertiary-500`}>{r.note || ''}</td></tr>)}
+            {data.employee_rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="employee-tds-row"><td className={`${td} min-w-[9rem]`}>{r.company}</td><td className={`${td} font-medium`}>{r.employee}{r.employee_code && <span className="ml-1 text-[11px] font-normal text-tertiary-500">{r.employee_code}</span>}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.tds)}</td><td className={`${td} text-xs text-tertiary-500`}>{r.note || ''}</td></tr>)}
             {!data.employee_rows.length && <tr><td colSpan={5} className="px-3 py-6 text-center text-sm text-tertiary-500">No salary TDS in these months.</td></tr>}
           </tbody>
         </table>
@@ -563,7 +565,7 @@ function TdsPayableView({ params, companies }) {
         <table className="min-w-full text-sm">
           <thead className="bg-canvas-muted"><tr><th className={th}>Company</th><th className={th}>Vendor</th><th className={th}>Invoice</th><th className={th}>Invoice date</th><th className={th}>Period</th><th className={thr}>Base</th><th className={thr}>GST</th><th className={thr}>TDS withheld</th><th className={thr}>Adjustment</th><th className={thr}>Net payable</th></tr></thead>
           <tbody>
-            {data.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-tds-row"><td className={td}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={`${td} whitespace-nowrap`}>{r.invoice_date || '—'}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base, r.currency)}</td><td className={tdr}>{r.gst ? money(r.gst, r.currency) : '—'}</td><td className={tdr}>{money(r.tds, r.currency)}</td><td className={tdr}>{r.adjustment ? money(r.adjustment, r.currency) : '—'}</td><td className={`${tdr} font-medium`}>{money(r.net_payable, r.currency)}</td></tr>)}
+            {data.rows.map((r) => <tr key={r.id} className="border-t border-tertiary-100" data-testid="vendor-tds-row"><td className={`${td} min-w-[9rem]`}>{r.company}</td><td className={`${td} font-medium`}>{r.vendor}{r.project && <span className="block text-[11px] font-normal text-tertiary-500">{r.project}</span>}</td><td className={td}>{r.number || '—'}</td><td className={`${td} whitespace-nowrap`}>{r.invoice_date || '—'}</td><td className={td}>{r.period}</td><td className={tdr}>{money(r.base, r.currency)}</td><td className={tdr}>{r.gst ? money(r.gst, r.currency) : '—'}</td><td className={tdr}>{money(r.tds, r.currency)}</td><td className={tdr}>{r.adjustment ? money(r.adjustment, r.currency) : '—'}</td><td className={`${tdr} font-medium`}>{money(r.net_payable, r.currency)}</td></tr>)}
             {!data.rows.length && <tr><td colSpan={10} className="px-3 py-6 text-center text-sm text-tertiary-500">No vendor invoice with TDS in these months.</td></tr>}
           </tbody>
         </table>
