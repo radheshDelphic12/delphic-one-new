@@ -146,6 +146,28 @@ describe('Client-brief amendment — shifts', () => {
     const desig = (await post('/designations', { name: 'SDE' })).body.data;
     expect((await patch(`/designations/${desig.id}`, { name: 'Software Engineer' })).body.data.name).toBe('Software Engineer');
   });
+
+  test('HR settings delete: a department, designation or shift in use is refused with the count; an unused one is deleted', async () => {
+    const { org, access_token: adminToken } = await seedOrgAdmin();
+    const post = (url, body) => authed(request(app).post(`/api/v1${url}`), adminToken).send(body);
+    const del = (url) => authed(request(app).delete(`/api/v1${url}`), adminToken);
+    const dept = (await post('/departments', { name: 'Used Dept' })).body.data;
+    const spare = (await post('/departments', { name: 'Spare Dept' })).body.data;
+    const desig = (await post('/designations', { name: 'Used Role' })).body.data;
+    const shift = (await post('/attendance/shifts', { name: 'Used Shift', start_minutes: 540, end_minutes: 1080 })).body.data;
+    const spareShift = (await post('/attendance/shifts', { name: 'Spare Shift', start_minutes: 600, end_minutes: 1140 })).body.data;
+    const { membership } = await seedOrgEmployee(org);
+    await prisma.orgMembership.update({ where: { id: membership.id }, data: { department_id: dept.id, designation_id: desig.id, shift_id: shift.id } });
+    const d1 = await del(`/departments/${dept.id}`);
+    expect(d1.status).toBe(409);
+    expect(d1.body.message).toMatch(/1 people/);
+    expect((await del(`/designations/${desig.id}`)).status).toBe(409);
+    expect((await del(`/attendance/shifts/${shift.id}`)).status).toBe(409);
+    expect((await del(`/departments/${spare.id}`)).status).toBe(200);
+    expect((await del(`/attendance/shifts/${spareShift.id}`)).status).toBe(200);
+    expect(await prisma.department.count({ where: { id: spare.id } })).toBe(0);
+    expect((await del('/departments/00000000-0000-4000-8000-000000000000')).status).toBe(404);
+  });
 });
 
 describe('Client-brief amendment — multi-project calendar mapping', () => {

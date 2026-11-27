@@ -362,6 +362,18 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
       throw err;
     }
   }
+  // delete: refused by the server (with the reason) while the department / designation / shift is still in use
+  async function deleteRow(row) {
+    if (!await confirmAction(`Delete ${row.name}?`)) return;
+    try {
+      await apiClient.delete(`${ENDPOINTS[tab]}/${row.id}`);
+      setRows((current) => current.filter((r) => r.id !== row.id));
+      pushInfo(`${row.name} deleted`);
+    } catch (err) {
+      pushError(apiErrorMessage(err, 'Could not delete it'), 'Not deleted');
+    }
+  }
+  const deleteButton = (row, label) => <button type="button" aria-label={label} data-testid="hr-setting-delete" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-danger-50 hover:text-danger-600" onClick={() => deleteRow(row)}><Trash2 className="h-3.5 w-3.5" /></button>;
   const editButton = (row, label) => <button type="button" aria-label={label} data-testid="hr-setting-edit" className="rounded-lg p-1.5 text-tertiary-400 hover:bg-primary-50 hover:text-primary-700" onClick={() => setEditingRow(row)}><Pencil className="h-3.5 w-3.5" /></button>;
 
   const [editingTeam, setEditingTeam] = useState(null);
@@ -498,7 +510,7 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
   const canManage = adminFor(user, 'hr_settings.update');
   const names = { departments: 'department', designations: 'designation' };
   const columns = tab === 'departments' || tab === 'designations'
-    ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end">{editButton(row, `Edit ${names[tab]}`)}</span> }] : [])]
+    ? [{ key: 'name', header: 'Name' }, { key: 'created', header: 'Created', render: (row) => new Date(row.created_at).toLocaleDateString() }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1">{editButton(row, `Edit ${names[tab]}`)}{deleteButton(row, `Delete ${names[tab]}`)}</span> }] : [])]
     : tab === 'teams'
     ? [
         { key: 'name', header: 'Team' },
@@ -527,7 +539,7 @@ export default function HrSettingsPage({ only = null, onChanged = null } = {}) {
         ) }] : []),
       ]
     : tab === 'shifts'
-    ? [{ key: 'name', header: 'Shift' }, { key: 'hours', header: 'Hours', render: (row) => `${minutesToTime(row.start_minutes)} - ${minutesToTime(row.end_minutes)}` }, { key: 'grace', header: 'Grace', render: (row) => `${row.grace_minutes}m` }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end">{editButton(row, 'Edit shift')}</span> }] : [])]
+    ? [{ key: 'name', header: 'Shift' }, { key: 'hours', header: 'Hours', render: (row) => `${minutesToTime(row.start_minutes)} - ${minutesToTime(row.end_minutes)}` }, { key: 'grace', header: 'Grace', render: (row) => `${row.grace_minutes}m` }, ...(canManage ? [{ key: 'actions', header: '', render: (row) => <span className="flex justify-end gap-1">{editButton(row, 'Edit shift')}{deleteButton(row, 'Delete shift')}</span> }] : [])]
     : [
         { key: 'name', header: 'Calendar', render: (row) => <button type="button" className="font-medium text-primary-700 hover:underline" onClick={() => openHolidays(row)}>{row.name}</button> },
         { key: 'kind', header: 'Kind', render: (row) => <span className="capitalize">{row.kind}</span> },

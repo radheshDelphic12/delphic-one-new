@@ -39,4 +39,15 @@ router.patch(
   })
 );
 
+router.delete(
+  '/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.remove(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Designation not found');
+    if (result.error === 'in_use') return fail(res, 409, `${result.people} people still hold this designation. Change theirs first.`);
+    return ok(res, result);
+  })
+);
+
 module.exports = router;

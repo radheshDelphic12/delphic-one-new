@@ -43,4 +43,16 @@ router.patch(
   })
 );
 
+router.delete(
+  '/:id',
+  requireOrgMembership,
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.remove(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Department not found');
+    if (result.error === 'in_use') return fail(res, 409, `This department is still used by ${[result.people && `${result.people} people`, result.designations && `${result.designations} designations`, result.teams && `${result.teams} teams`, result.calendars && `${result.calendars} calendars`].filter(Boolean).join(', ')}. Move them first.`);
+    return ok(res, result);
+  })
+);
+
 module.exports = router;

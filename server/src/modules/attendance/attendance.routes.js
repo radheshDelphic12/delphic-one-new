@@ -232,4 +232,15 @@ router.patch(
   })
 );
 
+router.delete(
+  '/shifts/:id',
+  authorize('admin'),
+  asyncHandler(async (req, res) => {
+    const result = await service.removeShift(req.user.org_id, req.params.id);
+    if (result.error === 'not_found') return fail(res, 404, 'Shift not found');
+    if (result.error === 'in_use') return fail(res, 409, `This shift is still used by ${[result.people && `${result.people} people`, result.rules && `${result.rules} check-in rules`].filter(Boolean).join(' and ')}. Move them to another shift first.`);
+    return ok(res, result);
+  })
+);
+
 module.exports = router;

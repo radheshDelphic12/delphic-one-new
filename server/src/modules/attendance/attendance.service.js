@@ -389,7 +389,22 @@ async function updateShift(orgId, id, input) {
   return { shift: await prisma.shift.update({ where: { id }, data: input }) };
 }
 
+/** Delete a shift nobody is on any more; refused with the count while people (or a check-in rule) still use it. */
+async function removeShift(orgId, id) {
+  const shift = await prisma.shift.findFirst({ where: { id, org_id: orgId } });
+  if (!shift) return { error: 'not_found' };
+  const [people, rules] = await Promise.all([
+    prisma.orgMembership.count({ where: { org_id: orgId, shift_id: id, employment_status: { not: 'terminated' } } }),
+    prisma.locationCheckinShiftRule.count({ where: { shift_id: id } }).catch(() => 0),
+  ]);
+  if (people + rules > 0) return { error: 'in_use', people, rules };
+  await prisma.orgMembership.updateMany({ where: { org_id: orgId, shift_id: id }, data: { shift_id: null } });
+  await prisma.shift.delete({ where: { id } });
+  return { removed: true };
+}
+
 module.exports = {
+  removeShift,
   updateShift,
   deleteRecord,
   listMine,

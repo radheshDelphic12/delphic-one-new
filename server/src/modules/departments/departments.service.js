@@ -22,4 +22,21 @@ async function update(orgId, id, { name }) {
   return { department };
 }
 
-module.exports = { list, create, update };
+/** Delete a department nobody uses any more; while it is in use the answer says how many people / designations / teams / calendars use it. */
+async function remove(orgId, id) {
+  const existing = await prisma.department.findFirst({ where: { id, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  const [people, designations, teams, calendars] = await Promise.all([
+    prisma.orgMembership.count({ where: { org_id: orgId, department_id: id, employment_status: { not: 'terminated' } } }),
+    prisma.designation.count({ where: { org_id: orgId, department_id: id } }),
+    prisma.team.count({ where: { org_id: orgId, department_id: id } }),
+    prisma.calendar.count({ where: { org_id: orgId, department_id: id } }),
+  ]);
+  if (people + designations + teams + calendars > 0) return { error: 'in_use', people, designations, teams, calendars };
+  // people who left keep no link to a deleted department
+  await prisma.orgMembership.updateMany({ where: { org_id: orgId, department_id: id }, data: { department_id: null } });
+  await prisma.department.delete({ where: { id } });
+  return { removed: true };
+}
+
+module.exports = { list, create, update, remove };

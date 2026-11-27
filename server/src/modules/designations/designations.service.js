@@ -30,4 +30,15 @@ async function update(orgId, id, { name, department_id }) {
   return { designation };
 }
 
-module.exports = { list, create, update };
+/** Delete a designation nobody holds any more (people who left lose the link); refused with the count while people hold it. */
+async function remove(orgId, id) {
+  const existing = await prisma.designation.findFirst({ where: { id, org_id: orgId } });
+  if (!existing) return { error: 'not_found' };
+  const people = await prisma.orgMembership.count({ where: { org_id: orgId, designation_id: id, employment_status: { not: 'terminated' } } });
+  if (people > 0) return { error: 'in_use', people };
+  await prisma.orgMembership.updateMany({ where: { org_id: orgId, designation_id: id }, data: { designation_id: null } });
+  await prisma.designation.delete({ where: { id } });
+  return { removed: true };
+}
+
+module.exports = { list, create, update, remove };
