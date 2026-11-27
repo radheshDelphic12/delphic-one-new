@@ -10624,6 +10624,8 @@ model CompanyStamp {
   org_id      String   @unique @db.Uuid
   image_path  String
   image_type  String   @default("png")
+  // also printed on the company's invoice PDFs (client and Book Keeping invoices)
+  on_invoices Boolean  @default(true)
   uploaded_by String?  @db.Uuid
   created_at  DateTime @default(now())
   updated_at  DateTime @default(now()) @updatedAt

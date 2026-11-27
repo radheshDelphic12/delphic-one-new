@@ -267,6 +267,16 @@ describe('default signature and several invoices in one PDF', () => {
     expect(broken.slice(0, 4).toString()).toBe('%PDF');
   });
 
+  test('the company stamp is printed in the signature box, next to the signature or on its own', async () => {
+    const signed = await taxInvoicePdf(model('A-1', { signature_image: PNG }));
+    const both = await taxInvoicePdf(model('A-1', { signature_image: PNG, stamp_image: PNG }));
+    const stampOnly = await taxInvoicePdf(model('A-1', { stamp_image: PNG }));
+    const plain = await taxInvoicePdf(model('A-1'));
+    expect(both.length).toBeGreaterThan(signed.length);
+    expect(stampOnly.length).toBeGreaterThan(plain.length);
+    expect(pages(both)).toBe(1);
+  });
+
   test('several invoices make one PDF, each with its own pages', async () => {
     const one = pages(await taxInvoicePdf(model('A-1')));
     const three = pages(await taxInvoicePdf([model('A-1'), model('A-2'), model('A-3')]));

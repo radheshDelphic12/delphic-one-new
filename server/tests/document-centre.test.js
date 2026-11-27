@@ -211,6 +211,13 @@ describe('signing', () => {
     const signed = await post(`/sign-requests/${id}/sign`, { placements: [{ page: 1, x: 0.1, y: 0.8, width: 0.2 }, { page: 2, x: 0.5, y: 0.7, width: 0.15, kind: 'stamp' }] }, signerToken);
     expect(signed.status).toBe(200);
     expect(signed.body.data.status).toBe('signed');
+    // printed on the company's invoices too, unless switched off
+    const service = require('../src/modules/documentCentre/documentCentre.service');
+    expect(await service.stampForInvoices(org.id)).toMatch(/^data:image\/png;base64,/);
+    expect((await authed(request(app).patch(`${D}/stamp`), adminToken).send({ on_invoices: false })).body.data).toEqual({ on_invoices: false });
+    expect(await service.stampForInvoices(org.id)).toBeNull();
+    expect((await get('/stamp', {}, signerToken)).body.data.on_invoices).toBe(false);
+    expect((await authed(request(app).patch(`${D}/stamp`), signerToken).send({ on_invoices: true })).status).toBe(200); // the signer is an admin here
     expect((await authed(request(app).delete(`${D}/stamp`), adminToken)).status).toBe(200);
     expect((await get('/stamp', {}, signerToken)).body.data.has_stamp).toBe(false);
   });

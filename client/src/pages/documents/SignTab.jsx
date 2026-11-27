@@ -54,6 +54,21 @@ function StampCard({ stamp, reload, canManage }) {
           {stamp?.has_stamp && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={remove}>Remove</button>}
         </div>
       )}
+      {stamp?.has_stamp && (
+        <label className="mt-3 flex items-center gap-2 text-sm text-tertiary-700">
+          <input
+            type="checkbox"
+            checked={stamp.on_invoices !== false}
+            disabled={!canManage || busy}
+            data-testid="stamp-on-invoices"
+            onChange={async (e) => {
+              setBusy(true);
+              try { await apiClient.patch('/document-centre/stamp', { on_invoices: e.target.checked }); pushSuccess(e.target.checked ? 'The stamp now prints on invoices' : 'The stamp no longer prints on invoices'); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Could not save'), 'Not saved'); } finally { setBusy(false); }
+            }}
+          />
+          Also print it on our invoice PDFs (client invoices and Book Keeping invoices), next to the signature
+        </label>
+      )}
     </section>
   );
 }

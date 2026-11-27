@@ -142,6 +142,11 @@ router.put('/stamp', mayManage, asyncHandler(async (req, res) => {
   const r = await service.setCompanyStamp(req.user.org_id, req.user.id, image);
   return r.error ? problem(res, r) : ok(res, r);
 }));
+router.patch('/stamp', mayManage, asyncHandler(async (req, res) => {
+  const { on_invoices } = z.object({ on_invoices: z.boolean() }).parse(req.body || {});
+  const r = await service.setStampOnInvoices(req.user.org_id, on_invoices);
+  return r.error ? fail(res, 404, 'Upload the stamp first') : ok(res, r);
+}));
 router.delete('/stamp', mayManage, asyncHandler(async (req, res) => ok(res, await service.clearCompanyStamp(req.user.org_id))));
 
 module.exports = router;

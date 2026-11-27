@@ -60,8 +60,10 @@ function invoiceModel(inv) {
 // The default signature is the entity's current one (it is not part of the issue-day snapshot).
 async function modelWithSignature(inv) {
   const model = invoiceModel(inv);
-  const entity = await prisma.legalEntity.findUnique({ where: { id: inv.legal_entity_id }, select: { signature_image: true, signatory_name: true } });
-  return { ...model, seller: { ...model.seller, signature_image: entity?.signature_image || null, signatory_name: entity?.signatory_name || null } };
+  const entity = await prisma.legalEntity.findUnique({ where: { id: inv.legal_entity_id }, select: { signature_image: true, signatory_name: true, workspace_id: true } });
+  // the company stamp of the workspace this legal entity is, when it prints it on invoices
+  const stamp = await require('../documentCentre/documentCentre.service').stampForInvoices(entity?.workspace_id);
+  return { ...model, seller: { ...model.seller, signature_image: entity?.signature_image || null, signatory_name: entity?.signatory_name || null, stamp_image: stamp } };
 }
 
 const invoicePdf = async (inv) => taxInvoicePdf(await modelWithSignature(inv));

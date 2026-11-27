@@ -40,6 +40,7 @@ async function companyParty(orgId, currency) {
     state_name: stateName(entity?.state_code),
     signature_image: entity?.signature_image || null,
     signatory_name: entity?.signatory_name || null,
+    stamp_image: await require('../documentCentre/documentCentre.service').stampForInvoices(orgId),
   };
   return { party, bankLines: String(bank?.payment_instructions || '').split('\n').map((t) => t.trim()).filter(Boolean) };
 }

@@ -203,7 +203,9 @@ function drawCopy(doc, model, copyLabel, cols) {
   const leftBottomH = (remarksText ? heightOf(doc, remarksText, leftW - 12) + 12 : 12) + heightOf(doc, model.declaration || DECLARATION, leftW - 12) + 24;
   const sumH = taxWords ? taxSummary(doc, model, 0, 0, 380, false) : 0;
   const signature = signatureBuffer(model.seller?.signature_image);
-  const signH = signature ? 72 : 52;
+  // the company stamp (Documents > Sign documents > Company stamp), when the company has one and prints it on invoices
+  const stamp = signatureBuffer(model.seller?.stamp_image);
+  const signH = signature || stamp ? 72 : 52;
   const midH = Math.max(bankH, leftBottomH);
   const bottomH = 34 + (taxWords ? sumH + 24 : 0) + midH + signH;
   const footerY = PAGE_H - M - 22;
@@ -395,6 +397,10 @@ function drawCopy(doc, model, copyLabel, cols) {
     setFont(doc, 'Helvetica-Bold', 8.5);
     doc.text(`for ${model.seller.name}`, M + leftW + 6, by + 4, { width: rightW - 12, align: 'right' });
     setFont(doc, 'Helvetica', 8);
+    if (stamp) {
+      // the stamp sits on the left of the company's signature box, the signature on the right
+      try { doc.image(stamp, M + leftW + 6, by + 14, { fit: [signH - 18, signH - 18] }); } catch (_err) { /* an unreadable image prints no stamp */ }
+    }
     if (signature) {
       try { doc.image(signature, M + leftW + 6, by + 17, { fit: [rightW - 12, signH - 34], align: 'right', valign: 'center' }); } catch (_err) { /* an unreadable image prints no signature */ }
     }

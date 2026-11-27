@@ -267,7 +267,7 @@ async function companyStamp(orgId) {
   const row = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
   if (!row || !fs.existsSync(row.image_path)) return { has_stamp: false };
   const buf = fs.readFileSync(row.image_path);
-  return { has_stamp: true, image: `data:image/${row.image_type === 'jpg' ? 'jpeg' : 'png'};base64,${buf.toString('base64')}`, updated_at: row.updated_at };
+  return { has_stamp: true, on_invoices: row.on_invoices, image: `data:image/${row.image_type === 'jpg' ? 'jpeg' : 'png'};base64,${buf.toString('base64')}`, updated_at: row.updated_at };
 }
 
 async function setCompanyStamp(orgId, userId, image) {
@@ -284,6 +284,25 @@ async function setCompanyStamp(orgId, userId, image) {
   });
   if (existing) safeUnlink(existing.image_path);
   return { saved: true };
+}
+
+/** The stamp as a data URL for the company's invoice PDFs; null when there is none or it is switched off for invoices. */
+async function stampForInvoices(orgId) {
+  if (!orgId) return null;
+  try {
+    const row = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
+    if (!row || !row.on_invoices || !fs.existsSync(row.image_path)) return null;
+    return `data:image/${row.image_type === 'jpg' ? 'jpeg' : 'png'};base64,${fs.readFileSync(row.image_path).toString('base64')}`;
+  } catch {
+    return null; // a stamp problem never stops an invoice from printing
+  }
+}
+
+async function setStampOnInvoices(orgId, on) {
+  const row = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
+  if (!row) return { error: 'not_found' };
+  await prisma.companyStamp.update({ where: { id: row.id }, data: { on_invoices: on } });
+  return { on_invoices: on };
 }
 
 async function clearCompanyStamp(orgId) {
@@ -557,7 +576,7 @@ async function cleanup(orgId, { days = 30 } = {}) {
 }
 
 module.exports = {
-  companyStamp, setCompanyStamp, clearCompanyStamp,
+  companyStamp, setCompanyStamp, clearCompanyStamp, stampForInvoices, setStampOnInvoices,
   KINDS, TAGS, MAX_PDF_BYTES, signingDir, requirementSchema, overviewQuery, requestMeta, signBody,
   listRequirements, addRequirement, renameRequirement, removeRequirement, overview,
   mySignature, setMySignature, clearMySignature, listSigners,
