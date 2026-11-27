@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
@@ -53,14 +54,14 @@ function Row({ name, sub, checked, onToggle, children, indent }) {
 export default function DaySchedule() {
   const { pushError } = useAlerts();
   const [data, setData] = useState(null);
-  const [shownProjects, setShownProjects] = useState(null); // null = all with hours
-  const [shownShifts, setShownShifts] = useState(null);
-  const [showPeople, setShowPeople] = useState(true);
+  const [shownProjects, setShownProjects] = useSavedState('reports.daySchedule.shownProjects', null); // null = all with hours
+  const [shownShifts, setShownShifts] = useSavedState('reports.daySchedule.shownShifts', null);
+  const [showPeople, setShowPeople] = useSavedState('reports.daySchedule.showPeople', true);
   // Two multi-select filters that work together: the projects to draw and the employees to show under their shifts (empty = everyone).
-  const [selProjects, setSelProjects] = useState([]);
-  const [selPeople, setSelPeople] = useState([]);
+  const [selProjects, setSelProjects] = useSavedState('reports.daySchedule.selProjects', []);
+  const [selPeople, setSelPeople] = useSavedState('reports.daySchedule.selPeople', []);
   // Picking projects also picks the people allocated to them today (switch off to choose the employees by hand).
-  const [autoPeople, setAutoPeople] = useState(true);
+  const [autoPeople, setAutoPeople] = useSavedState('reports.daySchedule.autoPeople', true);
   const [noticeOpen, setNoticeOpen] = useState(false); // the list of projects without working hours and employees without a shift
 
   useEffect(() => {

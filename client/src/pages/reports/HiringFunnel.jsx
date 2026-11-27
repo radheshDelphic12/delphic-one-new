@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -215,14 +216,14 @@ function DetailsDrawer({ detail, onClose }) {
 function HiringFunnelStages() {
   const { pushError } = useAlerts();
   const initial = rangeForPreset('this_month');
-  const [datePreset, setDatePreset] = useState('this_month');
-  const [dateFrom, setDateFrom] = useState(initial.date_from);
-  const [dateTo, setDateTo] = useState(initial.date_to);
-  const [sourcerId, setSourcerId] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [serviceType, setServiceType] = useState('');
-  const [groupBy, setGroupBy] = useState('month');
-  const [assumedAsPass, setAssumedAsPass] = useState(true);
+  const [datePreset, setDatePreset] = useSavedState('reports.hiringFunnel.datePreset', 'this_month');
+  const [dateFrom, setDateFrom] = useSavedState('reports.hiringFunnel.dateFrom', initial.date_from);
+  const [dateTo, setDateTo] = useSavedState('reports.hiringFunnel.dateTo', initial.date_to);
+  const [sourcerId, setSourcerId] = useSavedState('reports.hiringFunnel.sourcerId', '');
+  const [clientId, setClientId] = useSavedState('reports.hiringFunnel.clientId', '');
+  const [serviceType, setServiceType] = useSavedState('reports.hiringFunnel.serviceType', '');
+  const [groupBy, setGroupBy] = useSavedState('reports.hiringFunnel.groupBy', 'month');
+  const [assumedAsPass, setAssumedAsPass] = useSavedState('reports.hiringFunnel.assumedAsPass', true);
   const [people, setPeople] = useState([]);
   const [clients, setClients] = useState([]);
   const [data, setData] = useState(null);

@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Area,
@@ -338,58 +339,60 @@ export default function ReportsPage() {
   }, [user]);
   const defaults = useMemo(() => defaultDateRange(), []);
 
-  const [active, setActive] = useState(available[0]?.key || 'recruiter-performance');
-  const [datePreset, setDatePreset] = useState('this_month');
-  const [dateFrom, setDateFrom] = useState(defaults.dateFrom);
-  const [dateTo, setDateTo] = useState(defaults.dateTo);
-  const [thresholdDays, setThresholdDays] = useState('7');
-  const [groupBy, setGroupBy] = useState('month');
-  const [departmentId, setDepartmentId] = useState('');
-  const [individualId, setIndividualId] = useState('');
+  const [active, setActive] = useSavedState('reports.active', available[0]?.key || 'recruiter-performance');
+  // a report saved earlier that this person cannot open any more (role changed): back to the first one they can
+  useEffect(() => { if (available.length && !available.some((r) => r.key === active)) setActive(available[0].key); }, [available, active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [datePreset, setDatePreset] = useSavedState('reports.datePreset', 'this_month');
+  const [dateFrom, setDateFrom] = useSavedState('reports.dateFrom', defaults.dateFrom);
+  const [dateTo, setDateTo] = useSavedState('reports.dateTo', defaults.dateTo);
+  const [thresholdDays, setThresholdDays] = useSavedState('reports.thresholdDays', '7');
+  const [groupBy, setGroupBy] = useSavedState('reports.groupBy', 'month');
+  const [departmentId, setDepartmentId] = useSavedState('reports.departmentId', '');
+  const [individualId, setIndividualId] = useSavedState('reports.individualId', '');
   // bda-reports: Account (any type) + account-type filter for "Accounts brought".
-  const [bdaReportsAccountId, setBdaReportsAccountId] = useState('');
-  const [bdaReportsAccountType, setBdaReportsAccountType] = useState('');
+  const [bdaReportsAccountId, setBdaReportsAccountId] = useSavedState('reports.bdaReportsAccountId', '');
+  const [bdaReportsAccountType, setBdaReportsAccountType] = useSavedState('reports.bdaReportsAccountType', '');
   const [bdaReportsAccounts, setBdaReportsAccounts] = useState([]);
   // sales-reports: Client filter.
-  const [salesReportsAccountId, setSalesReportsAccountId] = useState('');
+  const [salesReportsAccountId, setSalesReportsAccountId] = useSavedState('reports.salesReportsAccountId', '');
   const [salesReportsAccounts, setSalesReportsAccounts] = useState([]);
   // clients-without-requirements: Sales POC = account owner (bda_id), Brought by = origin_owner_id.
-  const [coveragePocId, setCoveragePocId] = useState('');
-  const [coverageBroughtById, setCoverageBroughtById] = useState('');
+  const [coveragePocId, setCoveragePocId] = useSavedState('reports.coveragePocId', '');
+  const [coverageBroughtById, setCoverageBroughtById] = useSavedState('reports.coverageBroughtById', '');
   // CWR tab: current requirement situation of each active client
   // (all | with_requirements | no_active | without_active_requirements | closed_only).
-  const [coverageBucket, setCoverageBucket] = useState('all');
+  const [coverageBucket, setCoverageBucket] = useSavedState('reports.coverageBucket', 'all');
   const [coveragePeople, setCoveragePeople] = useState([]);
   const [savingCoverageId, setSavingCoverageId] = useState(null);
   // recruiter-vendor-gaps: filter by vendor account, the vendor's POC from our end,
   // and who brought the vendor in.
-  const [rvgVendorId, setRvgVendorId] = useState('');
-  const [rvgPocId, setRvgPocId] = useState('');
-  const [rvgBroughtById, setRvgBroughtById] = useState('');
+  const [rvgVendorId, setRvgVendorId] = useSavedState('reports.rvgVendorId', '');
+  const [rvgPocId, setRvgPocId] = useSavedState('reports.rvgPocId', '');
+  const [rvgBroughtById, setRvgBroughtById] = useSavedState('reports.rvgBroughtById', '');
   const [rvgVendors, setRvgVendors] = useState([]);
   // RVG: active = every active-stage vendor; inactive = no live submission;
   // has_live = Active − Inactive (has a live candidate).
-  const [rvgActivity, setRvgActivity] = useState('active');
-  const [hrSourcerId, setHrSourcerId] = useState('');
-  const [hrInterviewerId, setHrInterviewerId] = useState('');
-  const [hrSource, setHrSource] = useState('');
+  const [rvgActivity, setRvgActivity] = useSavedState('reports.rvgActivity', 'active');
+  const [hrSourcerId, setHrSourcerId] = useSavedState('reports.hrSourcerId', '');
+  const [hrInterviewerId, setHrInterviewerId] = useSavedState('reports.hrInterviewerId', '');
+  const [hrSource, setHrSource] = useSavedState('reports.hrSource', '');
   const [hrPeople, setHrPeople] = useState([]);
-  const [hrTab, setHrTab] = useState('sourcing');
-  const [joiningsTab, setJoiningsTab] = useState('by_sourcer');
-  const [bdaReportsTab, setBdaReportsTab] = useState('accounts_created');
-  const [salesReportsTab, setSalesReportsTab] = useState('requirements_created');
-  const [recruiterReportsTab, setRecruiterReportsTab] = useState('profiles_submitted_to_client');
-  const [ttsClientId, setTtsClientId] = useState('');
-  const [ttsRequirementId, setTtsRequirementId] = useState('');
-  const [ttsSourcerId, setTtsSourcerId] = useState('');
-  const [ttsSearch, setTtsSearch] = useState('');
-  const [ttsSearchApplied, setTtsSearchApplied] = useState('');
+  const [hrTab, setHrTab] = useSavedState('reports.hrTab', 'sourcing');
+  const [joiningsTab, setJoiningsTab] = useSavedState('reports.joiningsTab', 'by_sourcer');
+  const [bdaReportsTab, setBdaReportsTab] = useSavedState('reports.bdaReportsTab', 'accounts_created');
+  const [salesReportsTab, setSalesReportsTab] = useSavedState('reports.salesReportsTab', 'requirements_created');
+  const [recruiterReportsTab, setRecruiterReportsTab] = useSavedState('reports.recruiterReportsTab', 'profiles_submitted_to_client');
+  const [ttsClientId, setTtsClientId] = useSavedState('reports.ttsClientId', '');
+  const [ttsRequirementId, setTtsRequirementId] = useSavedState('reports.ttsRequirementId', '');
+  const [ttsSourcerId, setTtsSourcerId] = useSavedState('reports.ttsSourcerId', '');
+  const [ttsSearch, setTtsSearch] = useSavedState('reports.ttsSearch', '');
+  const [ttsSearchApplied, setTtsSearchApplied] = useSavedState('reports.ttsSearchApplied', '');
   const [ttsClients, setTtsClients] = useState([]);
   const [ttsRequirements, setTtsRequirements] = useState([]);
-  const [explorerStuckOnly, setExplorerStuckOnly] = useState(false);
-  const [explorerPastSlaOnly, setExplorerPastSlaOnly] = useState(false);
-  const [explorerSearch, setExplorerSearch] = useState('');
-  const [explorerStatus, setExplorerStatus] = useState('');
+  const [explorerStuckOnly, setExplorerStuckOnly] = useSavedState('reports.explorerStuckOnly', false);
+  const [explorerPastSlaOnly, setExplorerPastSlaOnly] = useSavedState('reports.explorerPastSlaOnly', false);
+  const [explorerSearch, setExplorerSearch] = useSavedState('reports.explorerSearch', '');
+  const [explorerStatus, setExplorerStatus] = useSavedState('reports.explorerStatus', '');
   const [departments, setDepartments] = useState([]);
   const [individuals, setIndividuals] = useState([]);
   const [payload, setPayload] = useState(null);

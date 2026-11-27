@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import apiClient from '../../lib/apiClient.js';
@@ -155,8 +156,8 @@ function PersonCard({ person, open }) {
 /** Reports > Monthly performance review: every employee, month by month since they joined, with the counts of their function. */
 export default function MonthlyReview() {
   const { pushError } = useAlerts();
-  const [filters, setFilters] = useState({ from_month: '', to_month: thisMonth(), function: 'all', team_id: '', status: 'current', search: '', include_billable: true, include_non_billable: false });
-  const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useSavedState('reports.monthlyReview.filters', { from_month: '', to_month: thisMonth(), function: 'all', team_id: '', status: 'current', search: '', include_billable: true, include_non_billable: false });
+  const [searchText, setSearchText] = useSavedState('reports.monthlyReview.searchText', '');
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
@@ -70,18 +71,18 @@ function Stat({ label, value, tone, onClick, active }) {
 export default function AiInterviewReport() {
   const { pushError, pushSuccess } = useAlerts();
   const { user } = useAuth();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [requirementId, setRequirementId] = useState('');
-  const [status, setStatus] = useState('');
-  const [outcome, setOutcome] = useState('');
-  const [submissionStage, setSubmissionStage] = useState('');
+  const [from, setFrom] = useSavedState('reports.aiInterviews.from', '');
+  const [to, setTo] = useSavedState('reports.aiInterviews.to', '');
+  const [requirementId, setRequirementId] = useSavedState('reports.aiInterviews.requirementId', '');
+  const [status, setStatus] = useSavedState('reports.aiInterviews.status', '');
+  const [outcome, setOutcome] = useSavedState('reports.aiInterviews.outcome', '');
+  const [submissionStage, setSubmissionStage] = useSavedState('reports.aiInterviews.submissionStage', '');
   const [reloadKey, setReloadKey] = useState(0);
   const [busyIds, setBusyIds] = useState(() => new Set()); // rows with a submit / reject in flight (a second click does nothing)
   const [rejecting, setRejecting] = useState(null); // { row, reason }
-  const [hideReplaced, setHideReplaced] = useState(false); // finished attempts that a newer link replaced are listed unless hidden
-  const [attempted, setAttempted] = useState(false); // every link that was sent is listed; tick to see only those who started
-  const [q, setQ] = useState('');
+  const [hideReplaced, setHideReplaced] = useSavedState('reports.aiInterviews.hideReplaced', false); // finished attempts that a newer link replaced are listed unless hidden
+  const [attempted, setAttempted] = useSavedState('reports.aiInterviews.attempted', false); // every link that was sent is listed; tick to see only those who started
+  const [q, setQ] = useSavedState('reports.aiInterviews.q', '');
   const [data, setData] = useState(null);
   const [requirements, setRequirements] = useState([]);
 

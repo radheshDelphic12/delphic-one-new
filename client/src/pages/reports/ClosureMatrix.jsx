@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../lib/apiClient.js';
@@ -93,15 +94,15 @@ export default function ClosureMatrix({ kind }) {
   const { pushError } = useAlerts();
   const isVendor = kind === 'vendor';
   const now = new Date();
-  const [from, setFrom] = useState(monthValue(new Date(now.getFullYear(), now.getMonth() - 5, 1)));
-  const [to, setTo] = useState(monthValue(now));
-  const [measure, setMeasure] = useState('projects');
-  const [reqType, setReqType] = useState('');
-  const [stage, setStage] = useState('');
-  const [vendorType, setVendorType] = useState('');
-  const [premium, setPremium] = useState('');
-  const [search, setSearch] = useState('');
-  const [hideEmpty, setHideEmpty] = useState(false);
+  const [from, setFrom] = useSavedState(`reports.closure.${kind}.from`, monthValue(new Date(now.getFullYear(), now.getMonth() - 5, 1)));
+  const [to, setTo] = useSavedState(`reports.closure.${kind}.to`, monthValue(now));
+  const [measure, setMeasure] = useSavedState(`reports.closure.${kind}.measure`, 'projects');
+  const [reqType, setReqType] = useSavedState(`reports.closure.${kind}.reqType`, '');
+  const [stage, setStage] = useSavedState(`reports.closure.${kind}.stage`, '');
+  const [vendorType, setVendorType] = useSavedState(`reports.closure.${kind}.vendorType`, '');
+  const [premium, setPremium] = useSavedState(`reports.closure.${kind}.premium`, '');
+  const [search, setSearch] = useSavedState(`reports.closure.${kind}.search`, '');
+  const [hideEmpty, setHideEmpty] = useSavedState(`reports.closure.${kind}.hideEmpty`, false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState(null); // { title, params } of the count that was clicked

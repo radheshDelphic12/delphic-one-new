@@ -1,3 +1,4 @@
+import useSavedState from '../../lib/useSavedState.js';
 import { useCallback, useEffect, useState } from 'react';
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import apiClient from '../../lib/apiClient.js';
@@ -42,10 +43,10 @@ function Stat({ label, children, hint }) {
 export default function JoiningAttrition() {
   const { pushError } = useAlerts();
   const departments = useDepartmentOptions(true);
-  const [from, setFrom] = useState(monthsAgo(11));
-  const [to, setTo] = useState(thisMonth());
-  const [department, setDepartment] = useState('');
-  const [contractors, setContractors] = useState(false);
+  const [from, setFrom] = useSavedState('reports.joiningAttrition.from', monthsAgo(11));
+  const [to, setTo] = useSavedState('reports.joiningAttrition.to', thisMonth());
+  const [department, setDepartment] = useSavedState('reports.joiningAttrition.department', '');
+  const [contractors, setContractors] = useSavedState('reports.joiningAttrition.contractors', false);
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(null); // { kind, month?, title }
   const [rows, setRows] = useState(null);
