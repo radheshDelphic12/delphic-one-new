@@ -9846,6 +9846,23 @@ model DoxCustomer {
   @@map("dox_customers")
 }
 
+// Delphic One: a shareable lead form (a public link). Each submission becomes a lead with source "website".
+model PublicLeadForm {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  token       String   @unique
+  title       String   @default("Talk to us")
+  intro       String?
+  active      Boolean  @default(true)
+  submissions Int      @default(0)
+  created_by  String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@index([org_id])
+  @@map("public_lead_forms")
+}
+
 model DoxLead {
   id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id             String    @db.Uuid

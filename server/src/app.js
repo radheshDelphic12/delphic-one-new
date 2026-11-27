@@ -233,6 +233,7 @@ app.use('/api/v1/finance-categories', financeCategoriesRoutes);
 app.use('/api/v1/invites', invitesRoutes);
 app.use('/api/v1/website', websiteRoutes);
 app.use('/api/v1/public', publicJobsRoutes);
+app.use('/api/v1/public', require('./modules/delphicone/leadForm.public.routes'));
 app.use('/api/v1/public', publicAssessmentsRoutes);
 app.use('/api/v1/public', publicAiInterviewsRoutes);
 app.use('/api/v1/public', publicWhistleblowerRoutes);

@@ -142,3 +142,35 @@ describe('invoices, payments and collection', () => {
     expect(s.receivables).toMatchObject({ outstanding: 1180, overdue: 1180, overdue_count: 1 });
   });
 });
+
+describe('the shareable lead form', () => {
+  test('the team makes a link; a submission through it becomes a lead; a bot, an off or replaced link get nothing', async () => {
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE public_lead_forms');
+    expect((await get('/lead-form')).body.data).toBeNull();
+    const form = (await post('/lead-form')).body.data;
+    expect(form).toMatchObject({ active: true, title: 'Talk to us', submissions: 0 });
+    expect((await post('/lead-form', {}, employeeToken)).status).toBe(403);
+    await patch('/lead-form', { title: 'Book a demo', intro: 'Tell us about your team' });
+
+    const P = `/api/v1/public/lead-forms/${form.token}`;
+    const page = await request(app).get(P);
+    expect(page.body.data).toEqual({ title: 'Book a demo', intro: 'Tell us about your team', company: 'Delphic One' });
+    expect((await request(app).post(P).send({ company_name: 'Acme', contact_name: 'Ana', contact_email: 'bad' })).status).toBe(422);
+    const sent = await request(app).post(P).send({ company_name: 'Acme', contact_name: 'Ana', contact_email: 'ana@acme.example', contact_phone: '99999', users_expected: 25, message: 'Need HR + payroll' });
+    expect(sent.status).toBe(201);
+    const leads = (await get('/leads')).body.data;
+    const lead = (leads.items || leads).find((l) => l.company_name === 'Acme');
+    expect(lead).toMatchObject({ source: 'website', stage: 'new', contact_email: 'ana@acme.example' });
+    // the hidden field filled in: answered, nothing kept
+    await request(app).post(P).send({ company_name: 'Bot Co', contact_name: 'B', contact_email: 'b@bot.example', website: 'http://spam' });
+    expect(((await get('/leads')).body.data.items || (await get('/leads')).body.data).some((l) => l.company_name === 'Bot Co')).toBe(false);
+    expect((await get('/lead-form')).body.data.submissions).toBe(1);
+    // switched off, then a new link replaces the old one
+    await patch('/lead-form', { active: false });
+    expect((await request(app).get(P)).status).toBe(404);
+    const next = (await post('/lead-form')).body.data;
+    expect(next.token).not.toBe(form.token);
+    expect((await request(app).get(`/api/v1/public/lead-forms/${next.token}`)).status).toBe(200);
+    expect((await request(app).post(P).send({ company_name: 'X', contact_name: 'Y', contact_email: 'y@x.example' })).status).toBe(404);
+  });
+});

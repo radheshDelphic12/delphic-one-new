@@ -7,6 +7,7 @@ import EmptyState from '../../components/ui/EmptyState.jsx';
 import Pill from '../../components/ui/Pill.jsx';
 import Skeleton from '../../components/ui/Skeleton.jsx';
 import { inputCls, labelCls, th, thr, td, tdr, rupees, useLoad, useSave } from './ui.jsx';
+import LeadFormCard from './LeadFormCard.jsx';
 
 const STAGE = { new: ['gray', 'New'], contacted: ['blue', 'Contacted'], demo: ['purple', 'Demo'], trial: ['amber', 'Trial'], won: ['green', 'Won'], lost: ['red', 'Lost'] };
 const SOURCES = { website: 'Website', referral: 'Referral', outbound: 'Outbound', event: 'Event', partner: 'Partner', other: 'Other' };
@@ -118,6 +119,7 @@ export default function DelphicOneLeadsPage() {
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
   return (
     <div className="space-y-3" data-testid="dox-leads">
+      {canEdit && <LeadFormCard onNewLeads={reload} />}
       <div className="flex flex-wrap items-end gap-3">
         <label className={labelCls}>Search<input className={inputCls} placeholder="Company or person" value={filters.q} onChange={set('q')} /></label>
         <label className={labelCls}>Stage<select className={inputCls} aria-label="Stage" value={filters.stage} onChange={set('stage')}><option value="">All</option>{Object.entries(STAGE).map(([k, [, l]]) => <option key={k} value={k}>{l}</option>)}</select></label>

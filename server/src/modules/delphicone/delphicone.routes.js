@@ -171,6 +171,15 @@ router.delete('/customers/:id', need('delete'), asyncHandler(async (req, res) =>
   return r.error ? problem(res, r) : ok(res, r);
 }));
 
+// the shareable lead form (Leads > Lead form): see it, make / replace the link, change its title / intro or switch it off
+const leadForm = require('./leadForm.service');
+router.get('/lead-form', need('leadsEdit'), asyncHandler(async (req, res) => ok(res, await leadForm.current(req.user.org_id))));
+router.post('/lead-form', need('leadsEdit'), asyncHandler(async (req, res) => created(res, await leadForm.renew(req.user.org_id, req.user.id))));
+router.patch('/lead-form', need('leadsEdit'), asyncHandler(async (req, res) => {
+  const r = await leadForm.update(req.user.org_id, leadForm.settingsSchema.parse(req.body || {}));
+  return r.error ? fail(res, 404, 'Make the form link first') : ok(res, r.form);
+}));
+
 // leads
 router.get('/leads', need('leads'), asyncHandler(async (req, res) => ok(res, await service.listLeads(req.user.org_id, z.object({ stage: z.enum(service.LEAD_STAGES).optional(), q: z.string().max(100).optional(), followup: z.enum(['due']).optional() }).parse(req.query)))));
 router.post('/leads', need('leadsEdit'), asyncHandler(async (req, res) => created(res, (await service.createLead(req.user.org_id, req.user, service.leadSchema.parse(req.body || {}))).lead)));
