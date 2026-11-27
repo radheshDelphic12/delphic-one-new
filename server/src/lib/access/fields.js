@@ -5,7 +5,7 @@ const { adminPower } = require('./guard');
  * designation, department, office, work email and manager. Pay-related and personal fields are removed from the response itself,
  * not hidden by the screen.
  */
-const DIRECTORY_KEYS = ['id', 'org_id', 'employee_code', 'employment_status', 'worker_type', 'work_mode', 'department', 'designation', 'team', 'location', 'manager'];
+const DIRECTORY_KEYS = ['id', 'org_id', 'employee_code', 'employment_status', 'worker_type', 'work_mode', 'department', 'designation', 'team', 'location', 'manager', 'client_site'];
 
 function directoryRow(row) {
   const out = {};

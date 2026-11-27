@@ -92,7 +92,9 @@ function sortByDepartment(rows) {
 }
 
 const NONE = '__none__';
-const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', userType: '', workMode: '', manager: '', joinedFrom: '', joinedTo: '' };
+const EMPTY_FILTERS = { department: '', designation: '', role: '', location: '', status: '', userType: '', workMode: '', manager: '', clientSite: '', joinedFrom: '', joinedTo: '' };
+// Deployed at a client site today (Group Travel > Deployments: an approved / active deployment, at the client's office or hybrid)
+const CLIENT_SITE_OPTIONS = [{ value: 'yes', label: 'At a client site' }, { value: 'no', label: 'Not at a client site' }];
 
 const FILTER_FIELDS = [
   { key: 'department', label: 'Department', get: (r) => r.department?.name },
@@ -105,6 +107,7 @@ const FILTER_FIELDS = [
   { key: 'userType', label: 'User type', get: (r) => r.worker_type || 'full_time_employee', fixed: WORKER_TYPE_OPTIONS },
   { key: 'workMode', label: 'Work mode', get: (r) => r.work_mode, fixed: WORK_MODE_OPTIONS },
   { key: 'manager', label: 'Manager', get: (r) => r.manager?.person?.name },
+  { key: 'clientSite', label: 'Client site', get: (r) => (r.client_site ? 'yes' : 'no'), fixed: CLIENT_SITE_OPTIONS },
 ];
 
 const humanize = (v) => String(v).replace(/_/g, ' ');
@@ -212,6 +215,7 @@ export default function PeopleListPage() {
         : <span className="text-tertiary-400">�</span>),
     },
     { key: 'location', header: 'Location', render: (row) => row.location?.name || 'Not assigned' },
+    { key: 'client_site', header: 'Client site', render: (row) => (row.client_site ? <span className="text-xs" data-testid="client-site-cell" title={`${row.client_site.code} ${row.client_site.title}${row.client_site.until ? ` until ${row.client_site.until}` : ''}`}><span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-800">At {row.client_site.client_name}</span>{row.client_site.location ? <span className="block text-tertiary-500">{row.client_site.location}</span> : null}</span> : <span className="text-tertiary-400">-</span>) },
     {
       key: 'status',
       header: 'Status',

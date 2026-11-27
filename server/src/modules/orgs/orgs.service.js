@@ -289,8 +289,34 @@ async function getReporting(orgId, membershipId) {
   };
 }
 
+/**
+ * Who is working at a client site today (Group Travel > Deployments): a person on an approved / active deployment, still active on it, whose
+ * dates cover today and who works at the client's office (or hybrid), not remotely. Keyed by user id.
+ */
+async function clientSiteByUser(userIds) {
+  if (!userIds.length) return new Map();
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const people = await prisma.groupDeploymentPerson.findMany({
+    where: {
+      user_id: { in: userIds }, status: 'active',
+      deployment: { status: { in: ['approved', 'active'] }, deleted_at: null, start_date: { lte: today }, actual_end_date: null },
+    },
+    select: { user_id: true, arrangement: true, start_date: true, end_date: true, deployment: { select: { id: true, code: true, title: true, client_name: true, client_location: true, working_arrangement: true, expected_end_date: true } } },
+  });
+  const out = new Map();
+  for (const p of people) {
+    const arrangement = p.arrangement === 'inherit' ? p.deployment.working_arrangement : p.arrangement;
+    if (arrangement === 'remote') continue;
+    if (p.start_date && p.start_date > today) continue;
+    const until = p.end_date || p.deployment.expected_end_date;
+    if (until && until < today) continue;
+    out.set(p.user_id, { deployment_id: p.deployment.id, code: p.deployment.code, title: p.deployment.title, client_name: p.deployment.client_name, location: p.deployment.client_location || null, arrangement, until: until ? until.toISOString().slice(0, 10) : null });
+  }
+  return out;
+}
+
 async function listMemberships(orgId, { search, include_terminated }) {
-  return prisma.orgMembership.findMany({
+  const rows = await prisma.orgMembership.findMany({
     where: {
       org_id: orgId,
       ...(include_terminated ? {} : { employment_status: { not: 'terminated' } }),
@@ -301,6 +327,8 @@ async function listMemberships(orgId, { search, include_terminated }) {
     orderBy: { joined_at: 'asc' },
     select: MEMBERSHIP_DETAIL_SELECT,
   });
+  const sites = await clientSiteByUser([...new Set(rows.map((r) => r.person?.id).filter(Boolean))]);
+  return rows.map((r) => ({ ...r, client_site: sites.get(r.person?.id) || null }));
 }
 
 async function getMembership(orgId, membershipId) {
