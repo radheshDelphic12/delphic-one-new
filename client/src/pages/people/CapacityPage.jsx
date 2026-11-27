@@ -475,7 +475,8 @@ function MovementReport() {
  * applied then — current state for today, history for the past.
  */
 export default function CapacityPage() {
-  const [tab, setTab] = useState('capacity');
+  // ?view=period opens a sub-tab directly (the dashboard's Team allocations card links here)
+  const [tab, setTab] = useState(() => { const v = new URLSearchParams(window.location.search).get('view'); return TABS.some((t) => t.key === v) ? v : 'capacity'; });
   return (
     <div className="space-y-4">
       <SectionTabs tabs={TABS} value={tab} onChange={setTab} />

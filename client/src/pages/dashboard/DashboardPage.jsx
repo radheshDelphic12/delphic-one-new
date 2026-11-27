@@ -32,6 +32,7 @@ import AnnouncementsCard from './AnnouncementsCard.jsx';
 import { DashboardCheckinCard } from '../time/LocationCheckinTab.jsx';
 import SpeakUpDashboardCard from '../speakup/SpeakUpDashboardCard.jsx';
 import BenchCard from './BenchCard.jsx';
+import TeamAllocationCard from './TeamAllocationCard.jsx';
 
 const cardMotion = {
   initial: { opacity: 0, y: 12 },
@@ -434,6 +435,13 @@ export default function DashboardPage() {
           {role === 'admin' && (
             <motion.div {...cardMotion}>
               <BenchCard />
+            </motion.div>
+          )}
+
+          {/* Delphic Global: the projects each person of a team (IT by default) is on this week / month / quarter */}
+          {isMasterWorkspace && (
+            <motion.div {...cardMotion}>
+              <TeamAllocationCard />
             </motion.div>
           )}
 
