@@ -48,6 +48,11 @@ export default function PaymentTrackerTab() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  // end of the range (Paras: start month to end month); the same as the start month = one month
+  const [toMonth, setToMonth] = useState(now.getMonth() + 1);
+  const [toYear, setToYear] = useState(now.getFullYear());
+  const isRange = toMonth !== month || toYear !== year;
+  const rangeBad = toYear * 12 + toMonth < year * 12 + month;
   const [client, setClient] = useState('');
   const [vendor, setVendor] = useState('');
   const [show, setShow] = useState('all');
@@ -56,14 +61,15 @@ export default function PaymentTrackerTab() {
 
   useEffect(() => {
     let cancelled = false;
+    if (rangeBad) { setData({ rows: [], summary: null, clients: [], vendors: [] }); return undefined; }
     setData(null);
-    apiClient.get('/billing/payment-tracker', { params: { period_month: month, period_year: year, ...(client ? { client_name: client } : {}), ...(vendor ? { vendor_account_id: vendor } : {}), ...(show !== 'all' ? { status: show } : {}) } })
+    apiClient.get('/billing/payment-tracker', { params: { period_month: month, period_year: year, to_month: toMonth, to_year: toYear, ...(client ? { client_name: client } : {}), ...(vendor ? { vendor_account_id: vendor } : {}), ...(show !== 'all' ? { status: show } : {}) } })
       .then(({ data: res }) => { if (!cancelled) setData(res.data); })
       .catch((err) => { if (!cancelled) { setData({ rows: [], summary: null, clients: [], vendors: [] }); pushError(apiErrorMessage(err, 'Could not load the payment tracker'), 'Something went wrong'); } });
     return () => { cancelled = true; };
-  }, [month, year, client, vendor, show, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [month, year, toMonth, toYear, client, vendor, show, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const resourceKey = (row) => ({ org_membership_id: row.org_membership_id, project_id: row.project.id, period_month: month, period_year: year });
+  const resourceKey = (row) => ({ org_membership_id: row.org_membership_id, project_id: row.project.id, period_month: row.period_month, period_year: row.period_year });
   async function markPaid(row) {
     const today = new Date().toISOString().slice(0, 10);
     const paidOn = await promptAction(`${row.resource}: paid to ${row.vendor.name} on (date):`, today);
@@ -84,6 +90,7 @@ export default function PaymentTrackerTab() {
   }
 
   const columns = [
+    ...(isRange ? [{ key: 'period', header: 'Month', render: (r) => <span className="whitespace-nowrap text-xs">{MONTHS[r.period_month - 1].slice(0, 3)} {r.period_year}</span> }] : []),
     { key: 'resource', header: 'Resource', render: (r) => <span><span className="font-medium text-tertiary-900">{r.resource}</span><span className="block text-xs text-tertiary-500">{r.approved_hours}h approved</span></span> },
     { key: 'vendor', header: 'Vendor', render: (r) => r.vendor.name },
     { key: 'project', header: 'Client / project', render: (r) => <span>{r.client_name || '—'}<span className="block text-xs text-tertiary-500">{r.project.name}{r.project.code ? ` · ${r.project.code}` : ''}</span></span> },
@@ -117,14 +124,20 @@ export default function PaymentTrackerTab() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Finance</p>
           <h2 className="mt-1 font-heading text-xl font-semibold text-tertiary-900">Client and vendor payments</h2>
-          <p className="mt-1 text-sm text-tertiary-500">For a month: each vendor resource, whether the client has paid us and whether we have paid the vendor, with both due dates. Employees are not here, their pay runs through payroll. Set the due dates in Invoicing and Vendor Invoices.</p>
+          <p className="mt-1 text-sm text-tertiary-500">For a month, or from a start month to an end month: each vendor resource, whether the client has paid us and whether we have paid the vendor, with both due dates. Employees are not here, their pay runs through payroll. Set the due dates in Invoicing and Vendor Invoices.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs font-medium text-tertiary-600">Month
+          <label className="text-xs font-medium text-tertiary-600">From month
             <select value={month} onChange={(e) => setMonth(Number(e.target.value))} aria-label="Month" className="mt-1 block rounded-xl border px-3 py-2 text-sm">{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
           </label>
           <label className="text-xs font-medium text-tertiary-600">Year
             <select value={year} onChange={(e) => setYear(Number(e.target.value))} aria-label="Year" className="mt-1 block rounded-xl border px-3 py-2 text-sm">{[now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">To month
+            <select value={toMonth} onChange={(e) => setToMonth(Number(e.target.value))} aria-label="To month" data-testid="tracker-to-month" className="mt-1 block rounded-xl border px-3 py-2 text-sm">{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+          </label>
+          <label className="text-xs font-medium text-tertiary-600">To year
+            <select value={toYear} onChange={(e) => setToYear(Number(e.target.value))} aria-label="To year" className="mt-1 block rounded-xl border px-3 py-2 text-sm">{[now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => <option key={y} value={y}>{y}</option>)}</select>
           </label>
           <label className="text-xs font-medium text-tertiary-600">Client
             <select value={client} onChange={(e) => setClient(e.target.value)} aria-label="Client" className="mt-1 block max-w-[14rem] rounded-xl border px-3 py-2 text-sm"><option value="">All clients</option>{(data?.clients || []).map((c) => <option key={c} value={c}>{c}</option>)}</select>
@@ -147,7 +160,7 @@ export default function PaymentTrackerTab() {
         </div>
       )}
 
-      <DataTable columns={columns} rows={(data?.rows || []).map((r) => ({ ...r, id: r.key }))} loading={!data} emptyLabel={`No vendor resources to track for ${MONTHS[month - 1]} ${year}`} maxHeight="calc(100dvh - 24rem)" />
+      <DataTable columns={columns} rows={(data?.rows || []).map((r) => ({ ...r, id: r.key }))} loading={!data} emptyLabel={rangeBad ? 'The end month is before the start month' : `No vendor resources to track for ${MONTHS[month - 1]} ${year}${isRange ? ` to ${MONTHS[toMonth - 1]} ${toYear}` : ''}`} maxHeight="calc(100dvh - 24rem)" />
     </div>
   );
 }

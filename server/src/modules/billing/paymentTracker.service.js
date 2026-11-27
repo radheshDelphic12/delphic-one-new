@@ -20,7 +20,11 @@ const querySchema = z.object({
   client_name: z.string().trim().max(200).optional(),
   vendor_account_id: z.string().uuid().optional(),
   status: z.enum(STATUS).optional(),
+  // optional end of a range: start month (period_*) to end month (to_*), at most 24 months
+  to_month: z.coerce.number().int().min(1).max(12).optional(),
+  to_year: z.coerce.number().int().min(2000).max(2100).optional(),
 });
+const MAX_MONTHS = 24;
 
 const n = (v) => Number(v || 0);
 
@@ -96,8 +100,8 @@ function summarize(rows) {
   const clients = new Map();
   const vendors = new Map();
   for (const r of rows) {
-    clients.set(r.client.id || `none:${r.project.id}`, r.client);
-    vendors.set(r.vendor_invoice.id || `none:${r.project.id}:${r.vendor.id}`, r.vendor_invoice);
+    clients.set(r.client.id || `none:${r.period}:${r.project.id}`, r.client);
+    vendors.set(r.vendor_invoice.id || `none:${r.period}:${r.project.id}:${r.vendor.id}`, r.vendor_invoice);
   }
   const count = (map, pick) => [...map.values()].filter(pick).length;
   return {
@@ -127,9 +131,40 @@ function summarize(rows) {
   };
 }
 
+/** The months from the start month to the end month (inclusive); null when the end is before the start or the range is too long. */
+function monthsBetween(fromMonth, fromYear, toMonth, toYear) {
+  const out = [];
+  let m = fromMonth; let y = fromYear;
+  while (y < toYear || (y === toYear && m <= toMonth)) {
+    out.push({ period_month: m, period_year: y });
+    if (out.length > MAX_MONTHS) return null;
+    m += 1; if (m > 12) { m = 1; y += 1; }
+  }
+  return out.length ? out : null;
+}
+
 async function paymentTracker(orgId, query) {
   const { period_month, period_year, client_name, vendor_account_id, status } = query;
-  const period = { period_month, period_year };
+  const months = monthsBetween(period_month, period_year, query.to_month || period_month, query.to_year || period_year);
+  if (!months) return { error: 'bad_range' };
+  const perMonth = await Promise.all(months.map((p) => monthRows(orgId, p, vendor_account_id)));
+  const all = perMonth.flat();
+
+  // the filter lists are built from the whole range, so choosing a client does not empty the vendor list
+  const clients = [...new Set(all.map((r) => r.client_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const vendorMap = new Map(all.map((r) => [r.vendor.id, r.vendor.name]));
+  const vendors = [...vendorMap].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+
+  const scoped = all.filter((r) => (!client_name || r.client_name === client_name) && (!vendor_account_id || r.vendor.id === vendor_account_id));
+  const rows = scoped.filter((r) => matchStatus(status, r));
+  const last = months[months.length - 1];
+  return { period_month, period_year, to_month: last.period_month, to_year: last.period_year, months: months.length, rows, summary: summarize(scoped), clients, vendors };
+}
+
+/** The contractor lines of one month, each with the client side and the vendor side. */
+async function monthRows(orgId, period, vendor_account_id) {
+  const { period_month, period_year } = period;
+  const label = `${period_year}-${String(period_month).padStart(2, '0')}`;
   const [vendorLive, clientInvoices, vendorInvoices, marks] = await Promise.all([
     live().vendorPaymentsLive(orgId, { ...period, vendor_account_id }),
     invoices.listClientInvoices(orgId, period),
@@ -160,16 +195,10 @@ async function paymentTracker(orgId, query) {
     }, markOf))
     // a contractor with nothing to bill that month (no approved hours, no invoice on either side) is not a payment to track
     .filter((r) => r.vendor_amount > 0 || r.client.state !== 'no_invoice' || r.vendor_invoice.state !== 'no_invoice')
-    .sort((a, b) => String(a.client_name).localeCompare(String(b.client_name)) || String(a.project.name).localeCompare(String(b.project.name)) || String(a.resource).localeCompare(String(b.resource)));
-
-  // the filter lists are built from the whole month, so choosing a client does not empty the vendor list
-  const clients = [...new Set(all.map((r) => r.client_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  const vendorMap = new Map(all.map((r) => [r.vendor.id, r.vendor.name]));
-  const vendors = [...vendorMap].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-
-  const scoped = all.filter((r) => (!client_name || r.client_name === client_name) && (!vendor_account_id || r.vendor.id === vendor_account_id));
-  const rows = scoped.filter((r) => matchStatus(status, r));
-  return { ...period, rows, summary: summarize(scoped), clients, vendors };
+    .sort((a, b) => String(a.client_name).localeCompare(String(b.client_name)) || String(a.project.name).localeCompare(String(b.project.name)) || String(a.resource).localeCompare(String(b.resource)))
+    // the month of the row; the key stays unique across a range of months
+    .map((row) => ({ ...row, key: `${label}|${row.key}`, period: label, period_month, period_year }));
+  return all;
 }
 
 const markSchema = z.object({

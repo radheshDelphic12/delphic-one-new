@@ -819,6 +819,27 @@ describe('Admin can delete invoices at any status (reason required once sent / p
     expect((await api('get', '/vendor-invoices/00000000-0000-4000-8000-000000000000/payment')).status).toBe(404);
   });
 
+  test('payment tracker: a range from a start month to an end month lists each month with its own rows; a backwards or too long range is refused', async () => {
+    const ctx = await seed();
+    const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });
+    const user = await createUser({ role: 'employee', name: 'Vendor Dev' });
+    const contractor = await prisma.orgMembership.create({ data: { person_id: user.id, org_id: ctx.org.id, role: 'employee', worker_type: 'contractor', vendor_account_id: ctx.vendor.id, vendor_rate: 2100, vendor_rate_currency: 'USD', joined_at: new Date('2026-01-01') } });
+    await prisma.projectMemberAssignment.create({ data: { org_id: ctx.org.id, account_id: p.id, org_membership_id: contractor.id, created_by: ctx.adminUser.id } });
+    await hours(ctx, contractor.id, p.id, WORK_10);
+    const api = (m, url) => authed(request(app)[m]('/api/v1/billing' + url), ctx.adminToken);
+    const get = (q) => api('get', '/payment-tracker').query(q);
+    const one = (await get(AUG)).body.data;
+    expect(one).toMatchObject({ months: 1 });
+    const next = AUG.period_month === 12 ? { to_month: 1, to_year: AUG.period_year + 1 } : { to_month: AUG.period_month + 1, to_year: AUG.period_year };
+    const two = (await get({ ...AUG, ...next })).body.data;
+    expect(two.months).toBe(2);
+    expect(two.rows.filter((r) => r.period_month === AUG.period_month)).toHaveLength(one.rows.length);
+    expect(new Set(two.rows.map((r) => r.key)).size).toBe(two.rows.length);
+    expect(two.rows[0]).toHaveProperty('period');
+    expect((await get({ ...AUG, to_month: AUG.period_month, to_year: AUG.period_year - 1 })).status).toBe(422);
+    expect((await get({ ...AUG, to_month: AUG.period_month, to_year: AUG.period_year + 3 })).status).toBe(422);
+  });
+
   test('vendor invoice: delete is audited with a reason', async () => {
     const ctx = await seed();
     const p = await project(ctx, { name: 'Miicare Platform', client: ctx.miicare, rate: 5000, currency: 'USD', end: '2026-08-14' });

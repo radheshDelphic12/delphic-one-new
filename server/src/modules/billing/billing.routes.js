@@ -882,7 +882,10 @@ const paymentTracker = require('./paymentTracker.service');
 router.get(
   '/payment-tracker',
   ...adminInOrg,
-  asyncHandler(async (req, res) => ok(res, await paymentTracker.paymentTracker(req.user.org_id, paymentTracker.querySchema.parse(req.query))))
+  asyncHandler(async (req, res) => {
+    const r = await paymentTracker.paymentTracker(req.user.org_id, paymentTracker.querySchema.parse(req.query));
+    return r.error ? fail(res, 422, 'Choose an end month on or after the start month, at most 24 months') : ok(res, r);
+  })
 );
 
 // One vendor resource marked paid (or not) for a month, on its own.
