@@ -22,6 +22,42 @@ const input = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-
 const size = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((b || 0) / 1024))} KB`);
 const when = (d) => (d ? String(d).slice(0, 10) : '');
 
+/** The company stamp (seal): uploaded once by whoever manages documents; signers drag it onto a document next to their signature. */
+function StampCard({ stamp, reload, canManage }) {
+  const { pushError, pushSuccess } = useAlerts();
+  const [busy, setBusy] = useState(false);
+  if (!canManage && !stamp?.has_stamp) return null;
+  function pick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpe?g)$/i.test(file.type)) { pushError('Use a PNG (best with a transparent background) or JPEG picture of the stamp', 'Not a picture'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setBusy(true);
+      try { await apiClient.put('/document-centre/stamp', { image: reader.result }); pushSuccess('Company stamp saved'); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Could not save the stamp'), 'Not saved'); } finally { setBusy(false); }
+    };
+    reader.readAsDataURL(file);
+  }
+  async function remove() {
+    if (!await confirmAction('Remove the company stamp? Documents can then be signed without it until a new one is added.')) return;
+    try { await apiClient.delete('/document-centre/stamp'); reload(); } catch (err) { pushError(apiErrorMessage(err, 'Could not remove it'), 'Not removed'); }
+  }
+  return (
+    <section className="rounded-2xl border border-tertiary-100 bg-white p-4 shadow-card" data-testid="stamp-card">
+      <h3 className="font-heading text-sm font-semibold text-tertiary-900">Company stamp</h3>
+      <p className="mt-0.5 text-xs text-tertiary-500">The company seal, placed on a document next to the signature while signing. Upload a clear PNG, ideally with a transparent background.</p>
+      {stamp?.has_stamp ? <div className="mt-3 inline-block rounded-xl border border-tertiary-100 bg-canvas-muted p-3"><img src={stamp.image} alt="Company stamp" className="max-h-24" data-testid="company-stamp" /></div> : <p className="mt-2 text-sm text-tertiary-500">No stamp yet.</p>}
+      {canManage && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <label className={`btn-secondary inline-flex cursor-pointer items-center gap-1.5 ${busy ? 'pointer-events-none opacity-60' : ''}`}><Upload className="h-4 w-4" />{stamp?.has_stamp ? 'Replace stamp' : 'Upload stamp'}<input type="file" accept="image/png,image/jpeg" className="hidden" onChange={pick} data-testid="stamp-file" /></label>
+          {stamp?.has_stamp && <button type="button" className="btn-ghost text-xs text-danger-600" onClick={remove}>Remove</button>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Your own signature: drawn or uploaded once, kept private, used only when you sign. */
 function SignatureCard({ signature, reload, canSign }) {
   const { pushError, pushSuccess } = useAlerts();
@@ -136,7 +172,9 @@ export default function SignTab() {
   const admin = isAdminUser(user);
   const canSign = allowed(user, 'documents.sign', admin);
   const canUpload = allowed(user, 'documents.upload', admin);
+  const canManage = allowed(user, 'documents.manage', admin);
   const [signature, setSignature] = useState(null);
+  const [stamp, setStamp] = useState(null);
   const [signers, setSigners] = useState([]);
   const [toSign, setToSign] = useState(null);
   const [mine, setMine] = useState(null);
@@ -146,6 +184,7 @@ export default function SignTab() {
 
   const load = useCallback(() => {
     if (canSign) apiClient.get('/document-centre/signatures/me').then(({ data }) => setSignature(data.data)).catch(() => setSignature({ has_signature: false }));
+    apiClient.get('/document-centre/stamp').then(({ data }) => setStamp(data.data)).catch(() => setStamp({ has_stamp: false }));
     apiClient.get('/document-centre/signers').then(({ data }) => setSigners(data.data || [])).catch(() => setSigners([]));
     apiClient.get('/document-centre/sign-requests', { params: { scope: 'to_sign', status: 'pending' } }).then(({ data }) => setToSign(data.data || [])).catch(() => setToSign([]));
     apiClient.get('/document-centre/sign-requests', { params: { scope: 'mine', ...(status ? { status } : {}) } }).then(({ data }) => setMine(data.data || [])).catch(() => setMine([]));
@@ -164,7 +203,7 @@ export default function SignTab() {
   if (studio) {
     return (
       <Suspense fallback={<p className="py-10 text-center text-sm text-tertiary-500">Opening the signing page…</p>}>
-        <SigningStudio request={studio} signature={signature?.image} onClose={() => { setStudio(null); load(); }} onDone={load} />
+        <SigningStudio request={studio} signature={signature?.image} stamp={stamp?.has_stamp ? stamp.image : null} onClose={() => { setStudio(null); load(); }} onDone={load} />
       </Suspense>
     );
   }
@@ -173,6 +212,7 @@ export default function SignTab() {
   return (
     <div className="space-y-4" data-testid="sign-tab">
       <SignatureCard signature={signature} reload={load} canSign={canSign} />
+      <StampCard stamp={stamp} reload={load} canManage={canManage} />
 
       {toSign && toSign.length > 0 && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4" data-testid="to-sign">

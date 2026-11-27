@@ -249,6 +249,39 @@ async function clearMySignature(orgId, userId) {
   return { removed: true };
 }
 
+// ---- the company stamp (seal): one per company, placed with the signature while signing
+
+async function companyStamp(orgId) {
+  const row = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
+  if (!row || !fs.existsSync(row.image_path)) return { has_stamp: false };
+  const buf = fs.readFileSync(row.image_path);
+  return { has_stamp: true, image: `data:image/${row.image_type === 'jpg' ? 'jpeg' : 'png'};base64,${buf.toString('base64')}`, updated_at: row.updated_at };
+}
+
+async function setCompanyStamp(orgId, userId, image) {
+  const img = decodeImage(image);
+  if (img.error) return { error: img.error };
+  ensure(signaturesDir());
+  const file = path.join(signaturesDir(), `stamp-${crypto.randomUUID()}.${img.type}`);
+  fs.writeFileSync(file, img.buf);
+  const existing = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
+  await prisma.companyStamp.upsert({
+    where: { org_id: orgId },
+    create: { org_id: orgId, image_path: file, image_type: img.type, uploaded_by: userId },
+    update: { image_path: file, image_type: img.type, uploaded_by: userId },
+  });
+  if (existing) safeUnlink(existing.image_path);
+  return { saved: true };
+}
+
+async function clearCompanyStamp(orgId) {
+  const existing = await prisma.companyStamp.findUnique({ where: { org_id: orgId } });
+  if (!existing) return { removed: true };
+  await prisma.companyStamp.delete({ where: { id: existing.id } });
+  safeUnlink(existing.image_path);
+  return { removed: true };
+}
+
 /** Everyone who can be asked to sign: people in this company who have a signature, and whether they have set one up. */
 async function listSigners(orgId) {
   const sigs = await prisma.userSignature.findMany({ where: { org_id: orgId }, select: { user_id: true } });
@@ -275,8 +308,11 @@ const placementSchema = z.object({
   x: z.coerce.number().min(0).max(1),
   y: z.coerce.number().min(0).max(1),
   width: z.coerce.number().min(0.03).max(0.9),
+  // the signer's signature (default) or the company stamp
+  kind: z.enum(['signature', 'stamp']).default('signature'),
 });
-const signBody = z.object({ placements: z.array(placementSchema).min(1, 'Place the signature on the document').max(20) });
+const signBody = z.object({ placements: z.array(placementSchema).min(1, 'Place the signature on the document').max(30) })
+  .refine((b) => b.placements.some((p) => p.kind === 'signature'), { message: 'Place your signature on the document', path: ['placements'] });
 
 const isManager = (user, decide) => user.role === 'admin' || decide(user, 'documents.manage') === true;
 
@@ -383,8 +419,13 @@ async function sign(orgId, user, id, body) {
   const disk = storage.diskReport();
   if (disk.available && disk.level === 'critical') return { error: 'storage_full' };
 
+  const wantsStamp = body.placements.some((p) => p.kind === 'stamp');
+  const stampRow = wantsStamp ? await prisma.companyStamp.findUnique({ where: { org_id: orgId } }) : null;
+  if (wantsStamp && (!stampRow || !fs.existsSync(stampRow.image_path))) return { error: 'no_stamp' };
+
   const pdf = await PDFDocument.load(fs.readFileSync(r.original_path));
   const image = sig.image_type === 'jpg' ? await pdf.embedJpg(fs.readFileSync(sig.image_path)) : await pdf.embedPng(fs.readFileSync(sig.image_path));
+  const stampImage = stampRow ? (stampRow.image_type === 'jpg' ? await pdf.embedJpg(fs.readFileSync(stampRow.image_path)) : await pdf.embedPng(fs.readFileSync(stampRow.image_path))) : null;
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const signer = await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } });
   const stamp = `Signed by ${signer?.name || 'signer'} on ${new Date().toISOString().slice(0, 10)}`;
@@ -393,13 +434,15 @@ async function sign(orgId, user, id, body) {
     if (p.page > pageCount) return { error: 'bad_page' };
     const page = pdf.getPage(p.page - 1);
     const { width: pw, height: ph } = page.getSize();
+    const picture = p.kind === 'stamp' ? stampImage : image;
     const w = p.width * pw;
-    const h = w * (image.height / image.width);
+    const h = w * (picture.height / picture.width);
     const x = Math.min(Math.max(p.x * pw, 0), Math.max(pw - w, 0));
     const yTop = Math.min(Math.max(p.y * ph, 0), Math.max(ph - h, 0));
     const y = ph - yTop - h;
-    page.drawImage(image, { x, y, width: w, height: h });
-    page.drawText(stamp, { x, y: Math.max(y - 9, 2), size: 6.5, font, color: rgb(0.39, 0.45, 0.55) });
+    page.drawImage(picture, { x, y, width: w, height: h });
+    // the "Signed by ... on ..." line goes under a signature, not under the company stamp
+    if (p.kind !== 'stamp') page.drawText(stamp, { x, y: Math.max(y - 9, 2), size: 6.5, font, color: rgb(0.39, 0.45, 0.55) });
   }
   const bytes = await pdf.save();
   ensure(signingDir());
@@ -484,6 +527,7 @@ async function cleanup(orgId, { days = 30 } = {}) {
 }
 
 module.exports = {
+  companyStamp, setCompanyStamp, clearCompanyStamp,
   KINDS, TAGS, MAX_PDF_BYTES, signingDir, requirementSchema, overviewQuery, requestMeta, signBody,
   listRequirements, addRequirement, renameRequirement, removeRequirement, overview,
   mySignature, setMySignature, clearMySignature, listSigners,

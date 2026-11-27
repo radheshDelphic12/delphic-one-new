@@ -138,6 +138,7 @@ const RULES = [
   [/^\/vendor-portal-admin\/invoices(\/|$)/, { GET: 'vendor_portal.view', '*': 'vendor_portal.manage' }],
 
   // Document Centre: what is on file for clients, vendors and employees, signing, and storage. Signing is by the signer only (the service checks who).
+  [/^\/document-centre\/stamp$/, { GET: ['documents.view', 'documents.sign'], '*': 'documents.manage' }],
   [/^\/document-centre\/signatures\/me(\/|$)/, 'documents.sign'],
   [/^\/document-centre\/sign-requests\/[^/]+\/(sign|decline)$/, 'documents.sign'],
   [/^\/document-centre\/sign-requests(\/|$)/, { GET: ['documents.view', 'documents.sign'], '*': 'documents.upload' }],

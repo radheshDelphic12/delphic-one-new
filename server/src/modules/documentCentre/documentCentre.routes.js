@@ -37,6 +37,7 @@ const ERRORS = {
   not_pending: [409, 'This request is already done'],
   file_removed: [410, 'The original file was cleaned up to save space'],
   no_signature: [409, 'Add your signature first (Documents > Sign > My signature)'],
+  no_stamp: [409, 'The company stamp is not set up yet (Documents > Sign documents > Company stamp)'],
   bad_page: [422, 'A signature is placed on a page that does not exist'],
   not_signed: [409, 'This document is not signed yet'],
   no_entity: [409, 'This request is not tagged to a client, vendor or employee'],
@@ -133,5 +134,14 @@ router.post('/cleanup', mayManage, asyncHandler(async (req, res) => {
   const { days } = z.object({ days: z.coerce.number().int().min(1).max(3650).default(30) }).parse(req.body || {});
   return ok(res, await service.cleanup(req.user.org_id, { days }));
 }));
+
+// ---- the company stamp: seen by whoever may view or sign, set or removed by whoever manages documents
+router.get('/stamp', canAny(['documents.view', 'documents.sign'], 'admin'), asyncHandler(async (req, res) => ok(res, await service.companyStamp(req.user.org_id))));
+router.put('/stamp', mayManage, asyncHandler(async (req, res) => {
+  const { image } = z.object({ image: z.string().max(1_200_000) }).parse(req.body || {});
+  const r = await service.setCompanyStamp(req.user.org_id, req.user.id, image);
+  return r.error ? problem(res, r) : ok(res, r);
+}));
+router.delete('/stamp', mayManage, asyncHandler(async (req, res) => ok(res, await service.clearCompanyStamp(req.user.org_id))));
 
 module.exports = router;

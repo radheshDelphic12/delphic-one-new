@@ -21,14 +21,15 @@ async function loadPdfjs() {
  * The signing page: the PDF page by page, with the signer's own signature in a tray. Drag it onto the page (or press "Add to this page"),
  * move it where it belongs, make it bigger or smaller, then "Sign and finish". Nothing is changed in the original: a signed copy is made.
  */
-export default function SigningStudio({ request, signature, onClose, onDone }) {
+export default function SigningStudio({ request, signature, stamp = null, onClose, onDone }) {
   const { pushError, pushSuccess } = useAlerts();
   const [pdf, setPdf] = useState(null);
   const [pageNo, setPageNo] = useState(1);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [placements, setPlacements] = useState([]); // { id, page, x, y, width } as fractions of the page, from the top-left
+  const [placements, setPlacements] = useState([]); // { id, kind, page, x, y, width } as fractions of the page, from the top-left; kind = signature | stamp
   const [selected, setSelected] = useState(null);
   const [aspect, setAspect] = useState(0.35); // signature height / width
+  const [stampAspect, setStampAspect] = useState(1); // stamp height / width
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [signed, setSigned] = useState(false);
@@ -76,13 +77,13 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
     return () => { cancelled = true; task?.cancel?.(); };
   }, [pdf, pageNo]);
 
-  const sigHeightFraction = useCallback((width) => (size.h ? (width * size.w * aspect) / size.h : 0), [size, aspect]);
-  const add = (page, cx, cy) => {
-    const width = 0.22;
-    const hFrac = sigHeightFraction(width);
+  const sigHeightFraction = useCallback((width, kind = 'signature') => (size.h ? (width * size.w * (kind === 'stamp' ? stampAspect : aspect)) / size.h : 0), [size, aspect, stampAspect]);
+  const add = (page, cx, cy, kind = 'signature') => {
+    const width = kind === 'stamp' ? 0.16 : 0.22;
+    const hFrac = sigHeightFraction(width, kind);
     const x = Math.min(Math.max(cx - width / 2, 0), 1 - width);
     const y = Math.min(Math.max(cy - hFrac / 2, 0), Math.max(1 - hFrac, 0));
-    const p = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, page, x, y, width };
+    const p = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, kind, page, x, y, width };
     setPlacements((cur) => [...cur, p]);
     setSelected(p.id);
   };
@@ -90,7 +91,8 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
   function onDrop(e) {
     e.preventDefault();
     const r = overlayRef.current.getBoundingClientRect();
-    add(pageNo, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    const kind = e.dataTransfer?.getData('text/plain') === 'stamp' && stamp ? 'stamp' : 'signature';
+    add(pageNo, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, kind);
   }
   function startMove(e, p) {
     e.preventDefault();
@@ -106,7 +108,7 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
     const r = overlayRef.current.getBoundingClientRect();
     setPlacements((cur) => cur.map((p) => {
       if (p.id !== d.id) return p;
-      const hFrac = sigHeightFraction(p.width);
+      const hFrac = sigHeightFraction(p.width, p.kind);
       return { ...p, x: Math.min(Math.max((e.clientX - r.left - d.dx) / r.width, 0), 1 - p.width), y: Math.min(Math.max((e.clientY - r.top - d.dy) / r.height, 0), Math.max(1 - hFrac, 0)) };
     }));
   }
@@ -118,7 +120,7 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
   async function finish() {
     setBusy(true);
     try {
-      await apiClient.post(`/document-centre/sign-requests/${request.id}/sign`, { placements: placements.map(({ page, x, y, width }) => ({ page, x, y, width })) });
+      await apiClient.post(`/document-centre/sign-requests/${request.id}/sign`, { placements: placements.map(({ kind, page, x, y, width }) => ({ kind, page, x, y, width })) });
       pushSuccess('Document signed');
       setSigned(true);
       onDone?.();
@@ -149,7 +151,7 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
         ) : (
           <div className="flex gap-2">
             <button type="button" className="btn-secondary" onClick={decline}>Do not sign</button>
-            <button type="button" className="btn-primary" disabled={busy || placements.length === 0} onClick={finish} data-testid="finish-signing">{busy ? 'Signing…' : `Sign and finish (${placements.length})`}</button>
+            <button type="button" className="btn-primary" disabled={busy || !placements.some((p) => p.kind === 'signature')} onClick={finish} data-testid="finish-signing">{busy ? 'Signing…' : `Sign and finish (${placements.length})`}</button>
           </div>
         )}
       </div>
@@ -184,12 +186,12 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
                     {placements.filter((p) => p.page === pageNo).map((p) => (
                       <img
                         key={p.id}
-                        src={signature}
-                        alt="Your signature"
+                        src={p.kind === 'stamp' ? stamp : signature}
+                        alt={p.kind === 'stamp' ? 'Company stamp' : 'Your signature'}
                         draggable={false}
-                        data-testid="placed-signature"
+                        data-testid={p.kind === 'stamp' ? 'placed-stamp' : 'placed-signature'}
                         onPointerDown={(e) => startMove(e, p)}
-                        onLoad={(e) => { if (e.currentTarget.naturalWidth) setAspect(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth); }}
+                        onLoad={(e) => { if (e.currentTarget.naturalWidth) (p.kind === 'stamp' ? setStampAspect : setAspect)(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth); }}
                         className={`absolute cursor-move touch-none select-none ${selected === p.id ? 'outline outline-2 outline-primary-500' : 'outline outline-1 outline-dashed outline-primary-300'}`}
                         style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%`, width: `${p.width * 100}%` }}
                       />
@@ -209,9 +211,18 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
             </div>
             <button type="button" className="btn-secondary mt-2 w-full" disabled={signed || !pdf} data-testid="add-signature" onClick={() => add(pageNo, 0.7, 0.85)}>Add to this page</button>
           </div>
+          {stamp ? (
+            <div className="rounded-xl border border-tertiary-100 bg-white p-3">
+              <p className="text-xs font-semibold text-tertiary-700">Company stamp</p>
+              <div className="mt-2 flex items-center justify-center rounded-lg border border-dashed border-tertiary-300 bg-canvas-muted p-3">
+                <img src={stamp} alt="Company stamp to drag" draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', 'stamp')} className="max-h-20 max-w-full cursor-grab" data-testid="stamp-tray" onLoad={(e) => { if (e.currentTarget.naturalWidth) setStampAspect(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth); }} />
+              </div>
+              <button type="button" className="btn-secondary mt-2 w-full" disabled={signed || !pdf} data-testid="add-stamp" onClick={() => add(pageNo, 0.45, 0.85, 'stamp')}>Stamp this page</button>
+            </div>
+          ) : <p className="rounded-xl border border-tertiary-100 bg-white p-3 text-[11px] text-tertiary-500">No company stamp is set up. A document admin adds it under Sign documents &gt; Company stamp.</p>}
           {current && (
             <div className="rounded-xl border border-tertiary-100 bg-white p-3" data-testid="placement-controls">
-              <p className="text-xs font-semibold text-tertiary-700">Selected signature (page {current.page})</p>
+              <p className="text-xs font-semibold text-tertiary-700">Selected {current.kind === 'stamp' ? 'stamp' : 'signature'} (page {current.page})</p>
               <label className="mt-2 block text-xs text-tertiary-600">Size
                 <input type="range" min="0.08" max="0.6" step="0.01" value={current.width} onChange={(e) => resize(Number(e.target.value))} className="mt-1 w-full" aria-label="Signature size" />
               </label>
@@ -223,7 +234,7 @@ export default function SigningStudio({ request, signature, onClose, onDone }) {
             {placements.length === 0 ? <p className="mt-1">Nothing yet. Drag the signature onto a page.</p> : (
               <ul className="mt-1 space-y-1">
                 {placements.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between"><button type="button" className="text-primary-700 hover:underline" onClick={() => { setPageNo(p.page); setSelected(p.id); }}>Page {p.page}</button><button type="button" aria-label="Remove" className="text-tertiary-400 hover:text-danger-600" onClick={() => remove(p.id)}>&times;</button></li>
+                  <li key={p.id} className="flex items-center justify-between"><button type="button" className="text-primary-700 hover:underline" onClick={() => { setPageNo(p.page); setSelected(p.id); }}>{p.kind === 'stamp' ? 'Stamp' : 'Signature'} · page {p.page}</button><button type="button" aria-label="Remove" className="text-tertiary-400 hover:text-danger-600" onClick={() => remove(p.id)}>&times;</button></li>
                 ))}
               </ul>
             )}

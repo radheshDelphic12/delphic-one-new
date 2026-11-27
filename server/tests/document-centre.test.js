@@ -26,7 +26,7 @@ async function pdfBytes(pages = 2) {
 
 beforeEach(async () => {
   await cleanDatabase();
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE signature_requests, user_signatures, document_requirements');
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE signature_requests, user_signatures, document_requirements, company_stamps');
   admin = await createUser({ role: 'admin', name: 'Diksha Admin' });
   ({ access_token: adminToken } = await loginAs(admin));
   org = await prisma.org.findUnique({ where: { id: (await prisma.orgMembership.findFirst({ where: { person_id: admin.id } })).org_id } });
@@ -155,6 +155,25 @@ describe('signing', () => {
     expect(mine.image.startsWith('data:image/png;base64,')).toBe(true);
     expect((await get('/signatures/me', {}, adminToken)).body.data.has_signature).toBe(false); // another person's is not theirs
     expect((await get('/signers')).body.data.map((s) => s.name)).toEqual(['Paras Signer']);
+  });
+
+  test('the company stamp: set by a manager, placed with the signature; a stamp alone or a missing stamp is refused', async () => {
+    await authed(request(app).put(`${D}/signatures/me`), signerToken).send({ image: PNG });
+    expect((await get('/stamp', {}, signerToken)).body.data).toEqual({ has_stamp: false });
+    const { res } = await makeRequest();
+    const id = res.body.data.id;
+    // no stamp set up yet
+    expect((await post(`/sign-requests/${id}/sign`, { placements: [{ page: 1, x: 0.1, y: 0.8, width: 0.2 }, { page: 1, x: 0.5, y: 0.8, width: 0.15, kind: 'stamp' }] }, signerToken)).status).toBe(409);
+    expect((await authed(request(app).put(`${D}/stamp`), adminToken).send({ image: 'data:text/plain;base64,aGk=' })).status).toBe(422);
+    expect((await authed(request(app).put(`${D}/stamp`), adminToken).send({ image: PNG })).status).toBe(200);
+    expect((await get('/stamp', {}, signerToken)).body.data).toMatchObject({ has_stamp: true });
+    // the stamp alone is not a signature
+    expect((await post(`/sign-requests/${id}/sign`, { placements: [{ page: 1, x: 0.5, y: 0.8, width: 0.15, kind: 'stamp' }] }, signerToken)).status).toBe(422);
+    const signed = await post(`/sign-requests/${id}/sign`, { placements: [{ page: 1, x: 0.1, y: 0.8, width: 0.2 }, { page: 2, x: 0.5, y: 0.7, width: 0.15, kind: 'stamp' }] }, signerToken);
+    expect(signed.status).toBe(200);
+    expect(signed.body.data.status).toBe('signed');
+    expect((await authed(request(app).delete(`${D}/stamp`), adminToken)).status).toBe(200);
+    expect((await get('/stamp', {}, signerToken)).body.data.has_stamp).toBe(false);
   });
 
   test('upload a PDF tagged to a client, the signer drops the signature on it, the signed PDF has it, and it can be attached to the client', async () => {

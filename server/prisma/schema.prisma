@@ -10428,6 +10428,19 @@ model DocumentRequirement {
   @@map("document_requirements")
 }
 
+// The company's stamp (seal), dragged onto a document next to the signature while signing (Document Centre). One per company.
+model CompanyStamp {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @unique @db.Uuid
+  image_path  String
+  image_type  String   @default("png")
+  uploaded_by String?  @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@map("company_stamps")
+}
+
 model UserSignature {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   org_id     String   @db.Uuid
