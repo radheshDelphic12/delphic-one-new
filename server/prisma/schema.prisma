@@ -10471,6 +10471,103 @@ model DocumentRequirement {
   @@map("document_requirements")
 }
 
+// Group Dashboard > Directory: a person the group knows, across companies (company_ids), with status (in_connect | fresh | left), source
+// (linkedin | event | reference | other), follow-ups and when they were last contacted. kind: client | vendor | customer | employee | contractor | other.
+model GroupDirectoryContact {
+  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id       String                   @db.Uuid
+  name               String
+  email              String?
+  phone              String?
+  designation        String?
+  organisation       String?
+  kind               String                   @default("other")
+  company_ids        String[]                 @default([]) @db.Uuid
+  status             String                   @default("fresh")
+  source             String?
+  linkedin_url       String?
+  last_connected_on  DateTime?                @db.Date
+  next_followup_date DateTime?                @db.Date
+  notes              String?
+  pipeline_key       String?
+  created_by         String?                  @db.Uuid
+  created_at         DateTime                 @default(now())
+  updated_at         DateTime                 @default(now()) @updatedAt
+  deleted_at         DateTime?
+  followups          GroupDirectoryFollowup[]
+
+  @@index([org_group_id, status])
+  @@index([org_group_id, email])
+  @@map("group_directory_contacts")
+}
+
+model GroupDirectoryFollowup {
+  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contact_id         String                @db.Uuid
+  contact            GroupDirectoryContact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  note               String
+  contacted_on       DateTime              @db.Date
+  next_followup_date DateTime?             @db.Date
+  created_by         String?               @db.Uuid
+  created_at         DateTime              @default(now())
+
+  @@index([contact_id])
+  @@map("group_directory_followups")
+}
+
+model GroupDirectorySkip {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String   @db.Uuid
+  pipeline_key String
+  skipped_by   String?  @db.Uuid
+  created_at   DateTime @default(now())
+
+  @@unique([org_group_id, pipeline_key])
+  @@map("group_directory_skips")
+}
+
+// Group Dashboard > Marketing: a campaign across the group's companies. channel: linkedin | google_ads | meta_ads | email | event | website |
+// referral | content | other; status: planned | live | paused | done.
+model GroupCampaign {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_group_id String                @db.Uuid
+  name         String
+  channel      String                @default("other")
+  company_ids  String[]              @default([]) @db.Uuid
+  status       String                @default("planned")
+  start_date   DateTime?             @db.Date
+  end_date     DateTime?             @db.Date
+  budget       Decimal               @default(0) @db.Decimal(16, 2)
+  target_leads Int?
+  leads        Int                   @default(0)
+  deals_won    Int                   @default(0)
+  revenue      Decimal               @default(0) @db.Decimal(16, 2)
+  owner_name   String?
+  notes        String?
+  created_by   String?               @db.Uuid
+  created_at   DateTime              @default(now())
+  updated_at   DateTime              @default(now()) @updatedAt
+  deleted_at   DateTime?
+  spends       GroupCampaignSpend[]
+
+  @@index([org_group_id, status])
+  @@map("group_campaigns")
+}
+
+model GroupCampaignSpend {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id String        @db.Uuid
+  campaign    GroupCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  spent_on    DateTime      @db.Date
+  amount      Decimal       @db.Decimal(16, 2)
+  note        String?
+  created_by  String?       @db.Uuid
+  created_at  DateTime      @default(now())
+
+  @@index([campaign_id])
+  @@map("group_campaign_spends")
+}
+
 // People > Seating: a desk in an office and who sits there (one desk per person).
 model OfficeSeat {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
