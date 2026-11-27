@@ -17,11 +17,12 @@ const problem = (res, r) => {
 };
 
 router.get('/', asyncHandler(async (req, res) => ok(res, await service.list(req.user.org_group_ids, service.listSchema.parse(req.query)))));
-router.get('/pipeline', asyncHandler(async (req, res) => ok(res, await service.pipeline(req.user.org_group_ids))));
+router.get('/pipeline', asyncHandler(async (req, res) => ok(res, await service.pipeline(req.user.org_group_ids, { view: req.query.view === 'skipped' ? 'skipped' : 'open' }))));
 router.post('/pipeline/add', asyncHandler(async (req, res) => {
   const r = await service.addFromPipeline(req.user.org_group_ids, req.user.id, service.addFromPipelineSchema.parse(req.body || {}));
   return r.error ? problem(res, r) : created(res, r.contact);
 }));
+router.post('/pipeline/unskip', asyncHandler(async (req, res) => ok(res, await service.unskip(req.user.org_group_ids, service.skipSchema.parse(req.body || {})))));
 router.post('/pipeline/skip', asyncHandler(async (req, res) => ok(res, await service.skip(req.user.org_group_ids, req.user.id, service.skipSchema.parse(req.body || {})))));
 router.post('/', asyncHandler(async (req, res) => {
   const r = await service.create(req.user.org_group_ids, req.user.id, service.contactSchema.parse(req.body || {}));

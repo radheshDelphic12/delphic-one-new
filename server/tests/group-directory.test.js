@@ -70,3 +70,21 @@ test('the pipeline lists new people from every company once; add puts them in th
   // a plain employee cannot open the group directory
   expect((await authed(request(app).get('/api/v1/group-directory'), (await loginAs(emp)).access_token)).status).toBe(403);
 });
+
+test('pipeline rows carry the client / vendor status; a skipped person waits in the Skipped list and can be brought back', async () => {
+  await prisma.account.create({ data: { org_id: alpha.id, stage: 'dropped', owner_id: sup.id, origin_owner_id: sup.id, type: 'vendor', name: 'Vendor Z', poc_name: 'Zara Vendor', poc_email: 'zara@z.example' } });
+  let p = (await d('get', '/pipeline')).body.data;
+  const zara = p.candidates.find((x) => x.name === 'Zara Vendor');
+  expect(zara).toMatchObject({ kind: 'vendor', stage: 'dropped' });
+  expect((await d('post', '/pipeline/skip').send({ keys: zara.keys })).status).toBe(200);
+  p = (await d('get', '/pipeline')).body.data;
+  expect(p.candidates.find((x) => x.name === 'Zara Vendor')).toBeUndefined();
+  expect(p.skipped).toBe(1);
+  const sk = (await d('get', '/pipeline').query({ view: 'skipped' })).body.data;
+  expect(sk.candidates.map((x) => x.name)).toEqual(['Zara Vendor']);
+  expect(sk.candidates[0].skipped.by).toMatchObject({ id: sup.id });
+  expect((await d('post', '/pipeline/unskip').send({ keys: zara.keys })).body.data).toEqual({ restored: 1 });
+  p = (await d('get', '/pipeline')).body.data;
+  expect(p.candidates.find((x) => x.name === 'Zara Vendor')).toBeTruthy();
+  expect(p.skipped).toBe(0);
+});

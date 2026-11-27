@@ -13,34 +13,44 @@ const KINDS = [['client', 'Client'], ['vendor', 'Vendor'], ['customer', 'Custome
 const label = 'block text-xs font-medium text-tertiary-600';
 const input = 'mt-1 w-full rounded-xl border border-tertiary-200 px-3 py-2 text-sm';
 const today = () => new Date().toISOString().slice(0, 10);
+// Status of the client / vendor account a pipeline person was found in
+const STAGES = { active: ['Active', 'bg-success-50 text-success-700'], lead: ['Lead', 'bg-primary-50 text-primary-700'], meeting_scheduled: ['Meeting scheduled', 'bg-amber-50 text-amber-800'], rescheduled: ['Rescheduled', 'bg-amber-50 text-amber-800'], dropped: ['Dropped', 'bg-tertiary-100 text-tertiary-600'] };
+const day = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '');
 const Status = ({ s }) => <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS[s]?.[1] || ''}`}>{STATUS[s]?.[0] || s}</span>;
 
 /**
  * Group Dashboard > Directory: the people the group knows across all companies (one person can be linked to several of our companies),
  * with status (in connect / fresh / left), source, follow-ups and when they were last contacted. The Pipeline lists the people found in
- * any company that are not in the directory yet: add them or skip them.
+ * any company that are not in the directory yet: add them or skip them. Skipped people wait in the Skipped list and can be brought back.
+ * The pipeline filters by kind, client / vendor status, company and text.
  */
 export default function GroupDirectoryTab() {
   const { pushError, pushSuccess } = useAlerts();
   const [view, setView] = useSavedState('groupDirectory.view', 'directory');
   const [filters, setFilters] = useSavedState('groupDirectory.filters', { q: '', status: '', kind: '', company_id: '', source: '', followup: '' });
+  const [pipeView, setPipeView] = useSavedState('groupDirectory.pipeView', 'new');
+  const [pf, setPf] = useSavedState('groupDirectory.pipeFilters', { q: '', kind: '', stage: '', company_id: '' });
   const [data, setData] = useState(null);
   const [pipe, setPipe] = useState(null);
   const [editing, setEditing] = useState(null);
   const [follow, setFollow] = useState(null);
   const loadDir = useCallback(() => apiClient.get('/group-directory', { params: Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) }).then(({ data: res }) => setData(res.data)).catch((err) => { setData({ contacts: [], counts: {}, companies: [] }); pushError(apiErrorMessage(err, 'Could not load the directory'), 'Something went wrong'); }), [filters, pushError]);
-  const loadPipe = useCallback(() => apiClient.get('/group-directory/pipeline').then(({ data: res }) => setPipe(res.data)).catch(() => setPipe({ candidates: [], count: 0 })), []);
+  const loadPipe = useCallback(() => apiClient.get('/group-directory/pipeline', { params: pipeView === 'skipped' ? { view: 'skipped' } : {} }).then(({ data: res }) => setPipe({ ...res.data, view: pipeView })).catch(() => setPipe({ candidates: [], count: 0, skipped: 0, view: pipeView })), [pipeView]);
   useEffect(() => { loadDir(); }, [loadDir]);
   useEffect(() => { loadPipe(); }, [loadPipe]);
   const setF = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
+  const setP = (k) => (e) => setPf((f) => ({ ...f, [k]: e.target.value }));
+  const pq = pf.q.trim().toLowerCase();
+  const pipeRows = (pipe?.candidates || []).filter((c) => (!pq || `${c.name} ${c.email || ''} ${c.phone || ''} ${c.organisation || ''} ${c.designation || ''}`.toLowerCase().includes(pq))
+    && (!pf.kind || c.kind === pf.kind) && (!pf.stage || c.stage === pf.stage) && (!pf.company_id || c.company_ids.includes(pf.company_id)));
   async function remove(c) {
     if (!await confirmAction(`Remove ${c.name} from the directory?`)) return;
     try { await apiClient.delete(`/group-directory/${c.id}`); pushSuccess('Removed'); loadDir(); } catch (err) { pushError(apiErrorMessage(err, 'Could not remove'), 'Not removed'); }
   }
   async function pipeAction(cand, action, source) {
     try {
-      await apiClient.post(`/group-directory/pipeline/${action}`, { keys: action === 'skip' ? cand.keys : [cand.key], ...(source ? { source } : {}) });
-      pushSuccess(action === 'add' ? `${cand.name} added to the directory` : `${cand.name} skipped`);
+      await apiClient.post(`/group-directory/pipeline/${action}`, { keys: action === 'add' ? [cand.key] : cand.keys, ...(source ? { source } : {}) });
+      pushSuccess(action === 'add' ? `${cand.name} added to the directory` : action === 'unskip' ? `${cand.name} is back in the pipeline` : `${cand.name} skipped`);
       loadPipe(); if (action === 'add') loadDir();
     } catch (err) { pushError(apiErrorMessage(err, 'Could not do that'), 'Not done'); }
   }
@@ -48,7 +58,7 @@ export default function GroupDirectoryTab() {
     <div className="space-y-3" data-testid="group-directory">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex rounded-xl border border-tertiary-100 bg-white p-0.5 text-sm">
-          {[['directory', `Directory (${(data?.counts?.in_connect || 0) + (data?.counts?.fresh || 0) + (data?.counts?.left || 0)})`], ['pipeline', `Pipeline (${pipe?.count ?? '…'})`]].map(([k, l]) => <button key={k} type="button" onClick={() => setView(k)} data-testid={`dir-view-${k}`} className={`rounded-[10px] px-3 py-1.5 font-medium ${view === k ? 'bg-primary-600 text-white' : 'text-tertiary-600'}`}>{l}</button>)}
+          {[['directory', `Directory (${(data?.counts?.in_connect || 0) + (data?.counts?.fresh || 0) + (data?.counts?.left || 0)})`], ['pipeline', `Pipeline (${pipe && pipe.view !== 'skipped' ? pipe.count : '…'})`]].map(([k, l]) => <button key={k} type="button" onClick={() => setView(k)} data-testid={`dir-view-${k}`} className={`rounded-[10px] px-3 py-1.5 font-medium ${view === k ? 'bg-primary-600 text-white' : 'text-tertiary-600'}`}>{l}</button>)}
         </div>
         {view === 'directory' && <button type="button" className="btn-primary inline-flex items-center gap-1.5" onClick={() => setEditing({})} data-testid="dir-new"><Plus className="h-4 w-4" />Add contact</button>}
       </div>
@@ -88,15 +98,27 @@ export default function GroupDirectoryTab() {
         </>
       ) : (
         <div className="space-y-2">
-          <p className="text-sm text-tertiary-600">New people found in the companies (client and vendor contacts, customers, employees, contractors). Add them to the directory, or skip them; a skipped person does not come back.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-xl border border-tertiary-100 bg-white p-0.5 text-sm" role="tablist">
+              {[['new', 'New'], ['skipped', `Skipped${pipe ? ` (${pipe.view === 'skipped' ? pipe.count : pipe.skipped ?? 0})` : ''}`]].map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={pipeView === k} onClick={() => { if (k !== pipeView) { setPipe(null); setPipeView(k); } }} data-testid={`pipe-view-${k}`} className={`rounded-[10px] px-3 py-1 font-medium ${pipeView === k ? 'bg-primary-50 text-primary-700' : 'text-tertiary-600'}`}>{l}</button>)}
+            </div>
+            <input value={pf.q} onChange={setP('q')} placeholder="Name, email, phone, organisation" className="w-56 rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" />
+            <select value={pf.kind} onChange={setP('kind')} className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" aria-label="Kind" data-testid="pipe-kind"><option value="">Any kind</option>{KINDS.filter(([k]) => k !== 'other').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <select value={pf.stage} onChange={setP('stage')} className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" aria-label="Client / vendor status" data-testid="pipe-stage"><option value="">Any client / vendor status</option>{Object.entries(STAGES).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</select>
+            <select value={pf.company_id} onChange={setP('company_id')} className="rounded-xl border border-tertiary-200 px-3 py-1.5 text-sm" aria-label="Company"><option value="">All companies</option>{(data?.companies || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          </div>
+          <p className="text-sm text-tertiary-600">{pipeView === 'skipped'
+            ? 'People skipped for now. Bring one back to see them in the pipeline again.'
+            : 'New people found in the companies (client and vendor contacts, customers, employees, contractors). Add them to the directory, or skip them for now; skipped people wait in the Skipped list.'}</p>
           <div className="overflow-x-auto rounded-2xl border border-tertiary-100 bg-white shadow-card">
-            {!pipe ? <p className="p-4 text-sm text-tertiary-500">Loading...</p> : pipe.candidates.length === 0 ? <p className="p-6 text-center text-sm text-tertiary-500">Nobody new.</p> : (
+            {!pipe ? <p className="p-4 text-sm text-tertiary-500">Loading...</p> : pipeRows.length === 0 ? <p className="p-6 text-center text-sm text-tertiary-500">{pipeView === 'skipped' ? 'Nobody is skipped.' : pipe.candidates.length ? 'Nobody matches the filters.' : 'Nobody new.'}</p> : (
               <table className="min-w-full text-sm">
-                <thead className="bg-canvas-muted text-left text-xs uppercase text-tertiary-500"><tr><th className="px-3 py-2">Person</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Found in</th><th className="px-3 py-2">Add with source</th><th /></tr></thead>
-                <tbody>{pipe.candidates.slice(0, 300).map((c) => <PipeRow key={c.key} c={c} onAct={pipeAction} />)}</tbody>
+                <thead className="bg-canvas-muted text-left text-xs uppercase text-tertiary-500"><tr><th className="px-3 py-2">Person</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Found in</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">{pipeView === 'skipped' ? 'Skipped' : 'Add with source'}</th><th /></tr></thead>
+                <tbody>{pipeRows.slice(0, 300).map((c) => <PipeRow key={c.key} c={c} skippedView={pipeView === 'skipped'} onAct={pipeAction} />)}</tbody>
               </table>
             )}
           </div>
+          {pipeRows.length > 300 && <p className="text-xs text-tertiary-500">Showing the first 300 of {pipeRows.length}. Use the filters to narrow it down.</p>}
         </div>
       )}
       <ContactDrawer contact={editing} companies={data?.companies || []} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); loadDir(); }} />
@@ -105,15 +127,20 @@ export default function GroupDirectoryTab() {
   );
 }
 
-function PipeRow({ c, onAct }) {
+function PipeRow({ c, skippedView, onAct }) {
   const [source, setSource] = useState('');
   return (
     <tr className="border-t border-tertiary-100" data-testid="pipe-row">
       <td className="px-3 py-2"><span className="font-medium text-tertiary-900">{c.name}</span><span className="block text-xs text-tertiary-500">{[c.designation, c.organisation].filter(Boolean).join(' · ')}</span></td>
       <td className="px-3 py-2 text-xs">{c.email || '-'}<span className="block">{c.phone || ''}</span></td>
       <td className="px-3 py-2 text-xs">{c.found_in}<div className="mt-0.5 flex flex-wrap gap-1">{c.companies.map((x) => <span key={x.id} className="rounded-full bg-primary-50 px-2 py-0.5 text-[10px] text-primary-800">{x.name}</span>)}</div></td>
-      <td className="px-3 py-2"><select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" aria-label="Source"><option value="">No source</option>{SOURCES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
-      <td className="px-3 py-2"><span className="flex justify-end gap-1"><button type="button" className="btn-primary px-3 py-1 text-xs" onClick={() => onAct(c, 'add', source)} data-testid="pipe-add">Add</button><button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => onAct(c, 'skip')} data-testid="pipe-skip">Skip</button></span></td>
+      <td className="whitespace-nowrap px-3 py-2">{c.stage ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STAGES[c.stage]?.[1] || 'bg-tertiary-100 text-tertiary-600'}`} data-testid="pipe-stage-badge">{STAGES[c.stage]?.[0] || c.stage}</span> : <span className="text-xs text-tertiary-400">-</span>}</td>
+      <td className="px-3 py-2">{skippedView
+        ? <span className="text-xs text-tertiary-600">{day(c.skipped?.at)}{c.skipped?.by?.name ? ` by ${c.skipped.by.name}` : ''}</span>
+        : <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-lg border border-tertiary-200 px-2 py-1 text-xs" aria-label="Source"><option value="">No source</option>{SOURCES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}</td>
+      <td className="px-3 py-2"><span className="flex justify-end gap-1">{skippedView
+        ? <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => onAct(c, 'unskip')} data-testid="pipe-unskip">Bring back</button>
+        : <><button type="button" className="btn-primary px-3 py-1 text-xs" onClick={() => onAct(c, 'add', source)} data-testid="pipe-add">Add</button><button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => onAct(c, 'skip')} data-testid="pipe-skip">Skip</button></>}</span></td>
     </tr>
   );
 }
